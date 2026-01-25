@@ -61,10 +61,10 @@ def test_mode(audio_path: str, cadence: int = 4, total_frames: int = 120, fps: i
     """
     Test mode: Show what the schedule would look like without GPU rendering.
     """
-    from interpolation_engine import Keyframe, AnimationInterpolator
-    from audio_analyzer import AudioAnalyzer
-    from music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
-    from optical_flow_cadence import CadenceConfig, CadenceInterpolator, ColorCoherenceMethod
+    from src.interpolation_engine import Keyframe, AnimationInterpolator
+    from src.audio_analyzer import AudioAnalyzer
+    from src.music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
+    from src.optical_flow_cadence import CadenceConfig, CadenceInterpolator, ColorCoherenceMethod
     
     print("\n" + "=" * 70)
     print("🧪 TEST MODE - Showing schedule without GPU rendering")
@@ -178,11 +178,11 @@ def full_render(
     """
     Full render mode with GPU.
     """
-    from interpolation_engine import Keyframe, AnimationInterpolator
-    from sd_animator import StableDiffusionAnimator
-    from audio_analyzer import AudioAnalyzer
-    from music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
-    from optical_flow_cadence import CadenceConfig, ColorCoherenceMethod, OpticalFlowMethod
+    from src.interpolation_engine import Keyframe, AnimationInterpolator
+    from src.sd_animator import StableDiffusionAnimator
+    from src.audio_analyzer import AudioAnalyzer
+    from src.music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
+    from src.optical_flow_cadence import CadenceConfig, ColorCoherenceMethod, OpticalFlowMethod
     
     print("\n" + "=" * 70)
     print("🚀 FULL RENDER MODE - With Optical Flow Cadence")

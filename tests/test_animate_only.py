@@ -1,4 +1,4 @@
-from sd_animator import StableDiffusionAnimator, Keyframe, AnimationInterpolator
+from src.sd_animator import StableDiffusionAnimator, Keyframe, AnimationInterpolator
 
 # Define your animation (change the prompts to whatever you want!)
 keyframes = [

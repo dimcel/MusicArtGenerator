@@ -1,4 +1,4 @@
-from audio_analyzer import AudioAnalyzer
+from src.audio_analyzer import AudioAnalyzer
 
 # Load and analyze
 analyzer = AudioAnalyzer("song.mp3")

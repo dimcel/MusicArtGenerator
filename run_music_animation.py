@@ -16,12 +16,12 @@ Requirements:
 
 import os
 import sys
-from interpolation_engine import Keyframe, AnimationInterpolator
-from music_schedule import MusicSyncConfig
+from src.interpolation_engine import Keyframe, AnimationInterpolator
+from src.music_schedule import MusicSyncConfig
 
 # Only import SD animator if not in test mode (requires GPU)
 if "--test" not in sys.argv:
-    from sd_animator import StableDiffusionAnimator
+    from src.sd_animator import StableDiffusionAnimator
 
 
 def run_music_animation(
@@ -132,7 +132,7 @@ def run_music_animation(
     # =========================================================================
     
     print(f"\n🚀 Initializing Stable Diffusion...")
-    from sd_animator import StableDiffusionAnimator
+    from src.sd_animator import StableDiffusionAnimator
     animator = StableDiffusionAnimator()
     
     print(f"\n🎬 Starting render with music: {audio_path}")
@@ -195,8 +195,8 @@ def test_schedule_only(audio_path: str):
     Test the music schedule without rendering (no GPU needed).
     Useful for checking beat detection and amplitude mapping.
     """
-    from audio_analyzer import AudioAnalyzer
-    from music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
+    from src.audio_analyzer import AudioAnalyzer
+    from src.music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
     
     print("=" * 60)
     print("🧪 TEST MODE: Schedule Generation Only (No GPU)")

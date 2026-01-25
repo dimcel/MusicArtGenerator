@@ -11,7 +11,7 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional, Callable
 from dataclasses import dataclass, field
 
-from audio_analyzer import AudioAnalyzer
+from src.audio_analyzer import AudioAnalyzer
 
 
 @dataclass
@@ -399,7 +399,7 @@ def example_usage():
     print("=" * 60)
     
     # Create test audio
-    from audio_analyzer import AudioAnalyzer
+    from src.audio_analyzer import AudioAnalyzer
     import os
     
     # Check if test audio exists from previous run

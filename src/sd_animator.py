@@ -11,13 +11,13 @@ import os
 from pathlib import Path
 
 # Import our interpolation engine
-from interpolation_engine import AnimationInterpolator, Keyframe, TransformationEngine
+from src.interpolation_engine import AnimationInterpolator, Keyframe, TransformationEngine
 
-from audio_analyzer import AudioAnalyzer
-from music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
+from src.audio_analyzer import AudioAnalyzer
+from src.music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
 
 
-from optical_flow_cadence import (
+from src.optical_flow_cadence import (
     CadenceConfig, 
     CadenceInterpolator, 
     OpticalFlowMethod,
@@ -306,8 +306,8 @@ class StableDiffusionAnimator:
         Returns:
             List of output frame paths
         """
-        from audio_analyzer import AudioAnalyzer
-        from music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
+        from src.audio_analyzer import AudioAnalyzer
+        from src.music_schedule import MusicSchedule, MusicSyncConfig, apply_music_to_schedule
         
         # Default config if none provided
         if music_config is None:
@@ -488,7 +488,7 @@ class StableDiffusionAnimator:
         Returns:
             List of frame file paths
         """
-        from optical_flow_cadence import (
+        from src.optical_flow_cadence import (
             CadenceConfig, CadenceInterpolator, 
             pil_to_numpy, numpy_to_pil
         )
@@ -511,8 +511,8 @@ class StableDiffusionAnimator:
         
         # Optionally merge with music
         if audio_path and music_config:
-            from audio_analyzer import AudioAnalyzer
-            from music_schedule import MusicSchedule, apply_music_to_schedule
+            from src.audio_analyzer import AudioAnalyzer
+            from src.music_schedule import MusicSchedule, apply_music_to_schedule
             
             print(f"\n🎵 Analyzing audio: {audio_path}")
             analyzer = AudioAnalyzer(audio_path)
