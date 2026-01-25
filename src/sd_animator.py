@@ -26,12 +26,21 @@ from src.optical_flow_cadence import (
     numpy_to_pil
 )
 
+from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderKL
+
+
+vae = AutoencoderKL.from_pretrained(
+    "stabilityai/sd-vae-ft-mse",
+    torch_dtype=torch.float16 # if self.device == "cuda" else torch.float32
+)
 class StableDiffusionAnimator:
     """
     Creates animations using Stable Diffusion with frame-to-frame coherence
     """
     
-    def __init__(self, model_id: str = "runwayml/stable-diffusion-v1-5", 
+    # def __init__(self, model_id: str = "runwayml/stable-diffusion-v1-5",
+    def __init__(self, model_id: str = "SG161222/Realistic_Vision_V5.1_noVAE",
+ 
                  device: str = "cuda" if torch.cuda.is_available() else "cpu"):
         """
         Initialize the animator with a Stable Diffusion model
@@ -55,6 +64,7 @@ class StableDiffusionAnimator:
             
             self.pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
                 self.model_id,
+                vae = vae,
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
                 safety_checker=None,  # Disable for speed
                 requires_safety_checker=False
@@ -90,6 +100,7 @@ class StableDiffusionAnimator:
         # For first frame, we need txt2img
         txt2img_pipe = StableDiffusionPipeline.from_pretrained(
             self.model_id,
+            vae = vae,
             torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
             safety_checker=None,
             requires_safety_checker=False
