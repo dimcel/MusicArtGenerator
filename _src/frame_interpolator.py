@@ -290,7 +290,7 @@ class FrameInterpolator:
             traceback.print_exc()
             return self._optical_flow_interpolate(frame_a, frame_b, num_frames)
 
-
+# test function, should be inside the test folder
 def simple_interpolate(
     frame_a: Image.Image,
     frame_b: Image.Image,
@@ -313,73 +313,3 @@ def simple_interpolate(
     """
     interpolator = FrameInterpolator(method="blend")
     return interpolator.interpolate(frame_a, frame_b, num_frames)
-
-
-# =============================================================================
-# FUTURE ENHANCEMENTS - NOT YET IMPLEMENTED
-# =============================================================================
-#
-# Option 1: RIFE (Real-Time Intermediate Flow Estimation)
-# --------------------------------------------------------
-# - Fast neural interpolation (real-time on GPU)
-# - Better quality than optical flow, handles occlusions
-# - Installation: pip install torch torchvision
-#                 git clone https://github.com/hzwer/arXiv2020-RIFE
-# - Implementation:
-#     def _rife_interpolate(self, frame_a, frame_b, num_frames):
-#         from RIFE.model.RIFE_HD import Model
-#         model = Model()
-#         model.load_model('train_log', -1)
-#         model.eval()
-#         
-#         # Convert to tensors
-#         img0 = torch.from_numpy(np.array(frame_a)).permute(2,0,1).float() / 255
-#         img1 = torch.from_numpy(np.array(frame_b)).permute(2,0,1).float() / 255
-#         
-#         frames = []
-#         for i in range(1, num_frames + 1):
-#             timestep = i / (num_frames + 1)
-#             output = model.inference(img0, img1, timestep)
-#             frames.append(Image.fromarray(output))
-#         return frames
-#
-# Option 2: FILM (Frame Interpolation for Large Motion)
-# -------------------------------------------------------
-# - Google's state-of-the-art interpolation
-# - Best quality, handles complex motion and large displacements
-# - Installation: pip install tensorflow tensorflow-hub
-# - Implementation:
-#     def _film_interpolate(self, frame_a, frame_b, num_frames):
-#         import tensorflow as tf
-#         import tensorflow_hub as hub
-#         
-#         model = hub.load("https://tfhub.dev/google/film/1")
-#         
-#         # Prepare inputs
-#         img0 = tf.convert_to_tensor(np.array(frame_a)) / 255.0
-#         img1 = tf.convert_to_tensor(np.array(frame_b)) / 255.0
-#         
-#         frames = []
-#         for i in range(1, num_frames + 1):
-#             timestep = i / (num_frames + 1)
-#             output = model(img0, img1, timestep)
-#             frames.append(Image.fromarray((output.numpy() * 255).astype(np.uint8)))
-#         return frames
-#
-# Implementation Strategy:
-# ------------------------
-# 1. Add lazy loading for models (only load when method is used)
-# 2. Add try/except for optional dependencies
-# 3. Fall back to optical_flow or blend if packages not installed
-# 4. Cache loaded models to avoid reloading on each call
-#
-# Example with fallback:
-#     def _rife_interpolate(self, ...):
-#         try:
-#             from RIFE.model.RIFE_HD import Model
-#             # ... RIFE code ...
-#         except ImportError:
-#             print("⚠️  RIFE not installed, falling back to optical_flow")
-#             return self._optical_flow_interpolate(...)
-#
-# =============================================================================

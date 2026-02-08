@@ -139,7 +139,7 @@ class VideoAnimator:
         print(f"{'='*70}")
         
         return frame_paths
-    
+    # reminder, this is likely better to be in utils
     def create_video(
         self,
         frame_paths: List[str] = None,
@@ -205,7 +205,7 @@ class VideoAnimator:
         
         return video_path
 
-
+# this is a test, it should be removed, or go to test folder
 def simple_animation(
     prompt: str,
     frames: int = 60,

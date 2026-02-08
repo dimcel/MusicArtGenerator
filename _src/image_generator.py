@@ -15,7 +15,9 @@ from PIL import Image
 from typing import Optional
 from dataclasses import dataclass
 
+from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderKL, StableDiffusionPipeline
 
+#TODO check to see GOLD Standard for dataclass --> and diffefence with enums
 @dataclass
 class ImageGenerationConfig:
     """Configuration for image generation"""
@@ -75,8 +77,7 @@ class ImageGenerator:
         """Load text-to-image pipeline (lazy loading)"""
         if self._txt2img_pipe is not None:
             return
-        
-        from diffusers import StableDiffusionPipeline, AutoencoderKL
+
         
         print("   Loading txt2img pipeline...")
         
@@ -104,16 +105,14 @@ class ImageGenerator:
             except Exception:
                 pass
         
-        print("   ✓ txt2img ready")
+        print("txt2img ready")
     
     def _load_img2img_pipeline(self):
         """Load image-to-image pipeline"""
         if self._img2img_pipe is not None:
             return
         
-        from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderKL
-        
-        print("   Loading img2img pipeline...")
+        print("Loading img2img pipeline...")
         
         # Load VAE
         vae = AutoencoderKL.from_pretrained(

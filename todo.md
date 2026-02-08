@@ -9,13 +9,10 @@
 - ✅ `_video_animator.py` - Keyframe + interpolation system
 
 ### Features
-- ✅ Fixed beat schedule (1 beat per N seconds)
-- ✅ Disabled amplitude modulation (stopped rapid changes)
 - ✅ Deforum-style animation (txt2img → img2img chain)
 - ✅ Frame interpolation with keyframes (2x, 4x, 8x speedup)
 - ✅ Alpha blending interpolation
-- ✅ OpenCV optical flow interpolation
-- ✅ Concat demuxer for gap-free video creation
+
 
 ### Testing
 - ✅ `test_image_generator.py` - SD generation tests
@@ -31,12 +28,7 @@
 ## 🚧 In Progress / Next Steps
 
 ### Interpolation Enhancements
-- ✅ Alpha blending interpolation (simple, fast)
-- ✅ OpenCV optical flow interpolation (motion-aware)
-- ✅ FILM neural interpolation (best quality, needs TensorFlow)
-- ⏳ Fix FILM tensor shape issue
 - ⏳ Add RIFE neural interpolation (optional dependency)
-- ⏳ Test and compare all interpolation methods
 
 ### Beat Integration
 - ⏳ Connect fixed beat schedule to video animator
@@ -44,7 +36,7 @@
 - ⏳ Dynamic strength based on beats
 
 ### Additional Modules (from refactoring plan)
-- ⏳ Frame transformer (zoom, rotate, translate)
+- ⏳ Frame transformer (zoom, rotate, translate) --> look at video_effects.txt
 - ⏳ Audio analyzer refactor
 - ⏳ Music schedule refactor
 - ⏳ Complete integration of all modules
