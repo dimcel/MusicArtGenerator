@@ -64,26 +64,22 @@ def generate_transform_video():
     print("STEP 3: Generate Animation with Transforms")
     print(f"{'='*70}")
     
-    # Transform parameters
-    zoom_per_frame = 0.005  # 0.5% zoom per frame (gradual)
-    pan_per_frame = 0.3     # 0.3 pixels right per frame
+    # Transform parameters (DELTA per frame, not cumulative!)
+    zoom_delta = 1.005  # 0.5% zoom per frame (incremental)
+    pan_delta = 0.3     # 0.3 pixels right per frame (incremental)
     
-    print(f"\nEffects:")
-    print(f"  - Gradual zoom in: {zoom_per_frame*100:.1f}% per frame")
-    print(f"  - Slow pan right: {pan_per_frame:.1f}px per frame")
-    print(f"  - Total zoom: {1 + zoom_per_frame * TOTAL_FRAMES:.2f}x")
-    print(f"  - Total pan: {pan_per_frame * TOTAL_FRAMES:.1f}px\n")
+    print(f"\nEffects (Deforum-style incremental):")
+    print(f"  - Zoom delta: {(zoom_delta-1)*100:.1f}% per frame")
+    print(f"  - Pan delta: {pan_delta:.1f}px per frame")
+    print(f"  - Approximate total zoom: {zoom_delta**TOTAL_FRAMES:.2f}x")
+    print(f"  - Total pan: ~{pan_delta * TOTAL_FRAMES:.1f}px\n")
     
     for frame_num in range(1, TOTAL_FRAMES):
-        # Calculate cumulative transform
-        zoom_factor = 1.0 + (zoom_per_frame * frame_num)
-        pan_x = pan_per_frame * frame_num
-        
-        # Apply transformation to previous frame
+        # Apply INCREMENTAL transform (delta from previous frame)
         transformed = transform_image(
             current_image,
-            zoom=zoom_factor,
-            translation_x=pan_x
+            zoom=zoom_delta,        # Always 1.005 (not cumulative!)
+            translation_x=pan_delta  # Always 0.3px (not cumulative!)
         )
         
         # Generate new frame from transformed image
@@ -99,7 +95,7 @@ def generate_transform_video():
         
         # Progress update
         if (frame_num + 1) % 20 == 0 or frame_num == TOTAL_FRAMES - 1:
-            print(f"   Frame {frame_num}/{TOTAL_FRAMES-1} - Zoom: {zoom_factor:.3f}, Pan: {pan_x:.1f}px")
+            print(f"   Frame {frame_num}/{TOTAL_FRAMES-1}")
     
     print(f"\n✓ All frames generated!")
     
