@@ -18,6 +18,41 @@ from _src.image_transform import transform_image
 from _src.frame_interpolator import FrameInterpolator
 
 
+def generate_fake_beats(total_frames, fps=24, bpm=120):
+    """
+    Generate fake beat positions to simulate librosa beat detection.
+    
+    This mimics what MusicSync would return, without needing audio files.
+    Real beats have slight variations, so we add some randomness.
+    
+    Args:
+        total_frames: Total video frames
+        fps: Frames per second
+        bpm: Beats per minute (approximate)
+    
+    Returns:
+        List of frame numbers where beats occur
+    """
+    import random
+    random.seed(42)  # Reproducible
+    
+    # Calculate frames per beat
+    frames_per_beat = (60.0 / bpm) * fps
+    
+    beats = [0]  # Start with frame 0
+    current_frame = 0
+    
+    while current_frame < total_frames:
+        # Add some variation (±10%) to make it realistic
+        variation = frames_per_beat * random.uniform(-0.1, 0.1)
+        current_frame += int(frames_per_beat + variation)
+        
+        if current_frame < total_frames:
+            beats.append(current_frame)
+    
+    return beats
+
+
 def generate_transform_video():
     """
     Generate a video showing zoom and pan effects
@@ -148,15 +183,19 @@ def generate_transform_video_with_interpolation():
     # Configuration
     PROMPT = "old man sitting on bench, peaceful autumn park, afternoon light"
     TOTAL_FRAMES = 120  # 5 seconds at 24fps
-    KEYFRAME_INTERVAL = 12  # Generate every 12th frame
     FPS = 24
+    BPM = 120  # Fake beats per minute
     OUTPUT_DIR = Path("transform_video_interp")
+    
+    # Generate fake beats (simulating what librosa would return)
+    beat_frames = generate_fake_beats(TOTAL_FRAMES, fps=FPS, bpm=BPM)
     
     print(f"\n📋 Configuration:")
     print(f"   Prompt: {PROMPT}")
     print(f"   Total frames: {TOTAL_FRAMES} ({TOTAL_FRAMES/FPS:.1f}s)")
-    print(f"   Keyframe every: {KEYFRAME_INTERVAL} frames")
-    print(f"   Keyframes to generate: {len(range(0, TOTAL_FRAMES, KEYFRAME_INTERVAL))}")
+    print(f"   BPM (simulated): {BPM}")
+    print(f"   Beat frames: {beat_frames}")
+    print(f"   Keyframes to generate: {len(beat_frames)}")
     print(f"   FPS: {FPS}")
     print(f"   Output: {OUTPUT_DIR}/")
     
@@ -194,7 +233,7 @@ def generate_transform_video_with_interpolation():
     print(f"  - Total pan: ~{pan_x_delta * TOTAL_FRAMES:.1f}px to the right")
     print(f"  - Total rotation: ~{angle_delta * TOTAL_FRAMES:.1f}°")
     
-    keyframes = {}  # {frame_num: image}
+    keyframe_images = {}  # {frame_num: image}
     current_image = None
     
     # Generate first frame
@@ -202,15 +241,17 @@ def generate_transform_video_with_interpolation():
         prompt=PROMPT,
         seed=42
     )
-    keyframes[0] = current_image
-    print(f"   ✓ Keyframe 0 generated")
+    keyframe_images[0] = current_image
+    print(f"   ✓ Beat keyframe 0 generated")
     
-    # Generate keyframes at intervals
-    keyframe_nums = list(range(KEYFRAME_INTERVAL, TOTAL_FRAMES, KEYFRAME_INTERVAL))
-    
-    for i, frame_num in enumerate(keyframe_nums, start=1):
-        # Apply transform KEYFRAME_INTERVAL times (zoom + pan + rotate)
-        for _ in range(KEYFRAME_INTERVAL):
+    # Generate keyframes at beat positions
+    for i in range(1, len(beat_frames)):
+        prev_beat = beat_frames[i - 1]
+        curr_beat = beat_frames[i]
+        frames_between = curr_beat - prev_beat
+        
+        # Apply transform for each frame between beats
+        for _ in range(frames_between):
             current_image = transform_image(
                 current_image,
                 zoom=zoom_delta,
@@ -218,18 +259,18 @@ def generate_transform_video_with_interpolation():
                 translation_x=pan_x_delta
             )
         
-        # Generate new keyframe
+        # Generate new keyframe at beat position with HIGH strength
         current_image = generator.generate_from_image(
             init_image=current_image,
             prompt=PROMPT,
-            strength=0.5,
-            seed=42 + frame_num
+            strength=0.85,  # HIGH on beats (sd-parseq style!)
+            seed=42 + i * 137  # Seed jump for variety
         )
         
-        keyframes[frame_num] = current_image
-        print(f"   ✓ Keyframe {frame_num} generated ({i}/{len(keyframe_nums)})")
+        keyframe_images[curr_beat] = current_image
+        print(f"   ✓ Beat keyframe {curr_beat} generated ({i}/{len(beat_frames)-1})")
     
-    print(f"\n✓ Generated {len(keyframes)} keyframes")
+    print(f"\n✓ Generated {len(keyframe_images)} beat keyframes")
     
     # Interpolate between keyframes
     print(f"\n{'='*70}")
@@ -237,14 +278,13 @@ def generate_transform_video_with_interpolation():
     print(f"{'='*70}")
     
     all_frames = []
-    keyframe_list = sorted(keyframes.keys())
     
-    for i in range(len(keyframe_list) - 1):
-        frame_a_num = keyframe_list[i]
-        frame_b_num = keyframe_list[i + 1]
+    for i in range(len(beat_frames) - 1):
+        frame_a_num = beat_frames[i]
+        frame_b_num = beat_frames[i + 1]
         
-        frame_a = keyframes[frame_a_num]
-        frame_b = keyframes[frame_b_num]
+        frame_a = keyframe_images[frame_a_num]
+        frame_b = keyframe_images[frame_b_num]
         
         # Add keyframe A
         all_frames.append(frame_a)
@@ -257,7 +297,7 @@ def generate_transform_video_with_interpolation():
             print(f"   Interpolated {num_between} frames between {frame_a_num} and {frame_b_num}")
     
     # Add final keyframe
-    all_frames.append(keyframes[keyframe_list[-1]])
+    all_frames.append(keyframe_images[beat_frames[-1]])
     
     print(f"\n✓ Total frames: {len(all_frames)}")
     
@@ -279,7 +319,7 @@ def generate_transform_video_with_interpolation():
     try:
         from frames_to_video import frames_to_video
         
-        video_path = OUTPUT_DIR / "transform_video_interp.mp4"
+        video_path = OUTPUT_DIR / "transform_beat_sync.mp4"
         frames_to_video(
             frames_dir=str(OUTPUT_DIR),
             output_path=str(video_path),
@@ -290,25 +330,30 @@ def generate_transform_video_with_interpolation():
     except ImportError:
         print("\n💡 Create video with ffmpeg:")
         print(f"   cd {OUTPUT_DIR}")
-        print(f"   ffmpeg -framerate {FPS} -i frame_%05d.png -c:v libx264 -pix_fmt yuv420p transform_video_interp.mp4")
+        print(f"   ffmpeg -framerate {FPS} -i frame_%05d.png -c:v libx264 -pix_fmt yuv420p transform_beat_sync.mp4")
     
     # Summary
     print(f"\n{'='*70}")
     print("✅ COMPLETE!")
     print(f"{'='*70}")
     
-    savings = (1 - len(keyframes) / TOTAL_FRAMES) * 100
+    savings = (1 - len(beat_frames) / TOTAL_FRAMES) * 100
     print(f"\n📊 Statistics:")
-    print(f"   Keyframes generated: {len(keyframes)}")
-    print(f"   Frames interpolated: {len(all_frames) - len(keyframes)}")
+    print(f"   Beat keyframes generated: {len(beat_frames)}")
+    print(f"   Frames interpolated: {len(all_frames) - len(beat_frames)}")
     print(f"   Total frames: {len(all_frames)}")
     print(f"   💰 Cost savings: {savings:.1f}% fewer generations!")
+    print(f"\n🎵 BEAT-SYNC EFFECT:")
+    print(f"   - Keyframes generated AT BEAT POSITIONS (not fixed interval!)")
+    print(f"   - High strength (0.85) on beats = more dramatic changes")
+    print(f"   - Seed jumps on beats for variation")
+    print(f"   - Transforms accumulate between beats")
     print(f"\n🎬 Watch the video to see:")
+    print(f"   - Visual 'pops' synchronized with fake beats")
     print(f"   - Strong zoom in with interpolation")
     print(f"   - Rotation (counterclockwise turn)")
     print(f"   - Pan to the right")
-    print(f"   - Much faster generation!")
-    print(f"\nOutput: {OUTPUT_DIR}/transform_video_interp.mp4")
+    print(f"\nOutput: {OUTPUT_DIR}/transform_beat_sync.mp4")
     print()
 
 
