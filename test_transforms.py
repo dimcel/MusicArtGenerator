@@ -14,190 +14,127 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from _src.image_generator import ImageGenerator, ImageGenerationConfig
-from _src.image_transform import transform_image, zoom_in, pan_right
+from _src.image_transform import transform_image
 
 
-def test_basic_transformations():
+def generate_transform_video():
     """
-    Test 1: Basic transformation functions
-    """
-    print("\n" + "=" * 70)
-    print("TEST 1: Basic Image Transformations")
-    print("=" * 70)
-    
-    # Generate a test image
-    print("\n1. Generating test image...")
-    gen_config = ImageGenerationConfig(width=512, height=512)
-    generator = ImageGenerator(gen_config)
-    
-    image = generator.generate_from_text(
-        prompt="old man on bench, autumn park",
-        seed=42
-    )
-    print("   ✓ Generated base image")
-    
-    # Create output directory
-    output_dir = Path("test_transforms")
-    output_dir.mkdir(exist_ok=True)
-    
-    # Save original
-    image.save(output_dir / "00_original.png")
-    print("\n2. Applying transformations...")
-    
-    # Test zoom
-    zoomed = zoom_in(image, amount=1.1)
-    zoomed.save(output_dir / "01_zoom_in_10pct.png")
-    print("   ✓ Zoom in 10%")
-    
-    # Test pan
-    panned = pan_right(image, pixels=20)
-    panned.save(output_dir / "02_pan_right_20px.png")
-    print("   ✓ Pan right 20 pixels")
-    
-    # Test combined
-    combined = transform_image(image, zoom=1.15, translation_x=15, angle=3)
-    combined.save(output_dir / "03_combined.png")
-    print("   ✓ Zoom 15% + Pan 15px + Rotate 3°")
-    
-    print(f"\n✓ Test complete! Check {output_dir}/ for results")
-    
-    return image
-
-
-def test_zoom_sequence():
-    """
-    Test 2: Create a zoom sequence (like Deforum does)
+    Generate a video showing zoom and pan effects
     """
     print("\n" + "=" * 70)
-    print("TEST 2: Zoom Sequence (10 frames)")
+    print("🎬 GENERATING TRANSFORMATION VIDEO")
     print("=" * 70)
     
-    # Generate starting image
-    print("\n1. Generating start image...")
+    # Configuration
+    PROMPT = "old man sitting on bench, peaceful autumn park, afternoon light"
+    TOTAL_FRAMES = 120  # 5 seconds at 24fps
+    FPS = 24
+    OUTPUT_DIR = Path("transform_video")
+    
+    print(f"\n📋 Configuration:")
+    print(f"   Prompt: {PROMPT}")
+    print(f"   Frames: {TOTAL_FRAMES} ({TOTAL_FRAMES/FPS:.1f}s)")
+    print(f"   FPS: {FPS}")
+    print(f"   Output: {OUTPUT_DIR}/")
+    
+    # Setup generator
+    print(f"\n{'='*70}")
+    print("STEP 1: Setup Generator")
+    print(f"{'='*70}")
+    
     gen_config = ImageGenerationConfig(width=512, height=512)
     generator = ImageGenerator(gen_config)
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    print("✓ Generator ready")
+    
+    # Generate first frame
+    print(f"\n{'='*70}")
+    print("STEP 2: Generate Starting Frame")
+    print(f"{'='*70}")
     
     current_image = generator.generate_from_text(
-        prompt="mountain landscape, sunrise",
+        prompt=PROMPT,
         seed=42
     )
+    current_image.save(OUTPUT_DIR / "frame_00000.png")
+    print("✓ Frame 0 generated")
     
-    output_dir = Path("test_zoom_sequence")
-    output_dir.mkdir(exist_ok=True)
+    # Generate animation with transforms
+    print(f"\n{'='*70}")
+    print("STEP 3: Generate Animation with Transforms")
+    print(f"{'='*70}")
     
-    # Save frame 0
-    current_image.save(output_dir / "frame_00.png")
-    print("   ✓ Frame 0 generated")
+    # Transform parameters
+    zoom_per_frame = 0.005  # 0.5% zoom per frame (gradual)
+    pan_per_frame = 0.3     # 0.3 pixels right per frame
     
-    print("\n2. Creating zoom sequence...")
-    zoom_per_frame = 0.02  # 2% zoom per frame
+    print(f"\nEffects:")
+    print(f"  - Gradual zoom in: {zoom_per_frame*100:.1f}% per frame")
+    print(f"  - Slow pan right: {pan_per_frame:.1f}px per frame")
+    print(f"  - Total zoom: {1 + zoom_per_frame * TOTAL_FRAMES:.2f}x")
+    print(f"  - Total pan: {pan_per_frame * TOTAL_FRAMES:.1f}px\n")
     
-    for i in range(1, 10):
-        # Apply zoom to previous frame
-        zoom_factor = 1.0 + (zoom_per_frame * i)
-        transformed = transform_image(current_image, zoom=zoom_factor)
+    for frame_num in range(1, TOTAL_FRAMES):
+        # Calculate cumulative transform
+        zoom_factor = 1.0 + (zoom_per_frame * frame_num)
+        pan_x = pan_per_frame * frame_num
+        
+        # Apply transformation to previous frame
+        transformed = transform_image(
+            current_image,
+            zoom=zoom_factor,
+            translation_x=pan_x
+        )
         
         # Generate new frame from transformed image
         current_image = generator.generate_from_image(
             init_image=transformed,
-            prompt="mountain landscape, sunrise",
-            strength=0.5,  # Medium change
-            seed=42 + i
+            prompt=PROMPT,
+            strength=0.5,  # Medium strength for smooth transitions
+            seed=42 + frame_num
         )
         
-        current_image.save(output_dir / f"frame_{i:02d}.png")
-        print(f"   ✓ Frame {i} (zoom: {zoom_factor:.2f})")
+        # Save frame
+        current_image.save(OUTPUT_DIR / f"frame_{frame_num:05d}.png")
+        
+        # Progress update
+        if (frame_num + 1) % 20 == 0 or frame_num == TOTAL_FRAMES - 1:
+            print(f"   Frame {frame_num}/{TOTAL_FRAMES-1} - Zoom: {zoom_factor:.3f}, Pan: {pan_x:.1f}px")
     
-    print(f"\n✓ Sequence complete! Check {output_dir}/")
-    print("  💡 Create video with: python frames_to_video.py --frames_dir test_zoom_sequence")
-
-
-def test_beat_zoom():
-    """
-    Test 3: Demonstrate beat-reactive zoom
+    print(f"\n✓ All frames generated!")
     
-    Shows how zoom can pulse on beats (blueprint for music sync)
-    """
-    print("\n" + "=" * 70)
-    print("TEST 3: Beat-Reactive Zoom (Blueprint)")
-    print("=" * 70)
+    # Create video
+    print(f"\n{'='*70}")
+    print("STEP 4: Creating Video")
+    print(f"{'='*70}")
     
-    print("""
-Blueprint for combining transforms with music sync:
-
-```python
-from _src.music_sync import MusicSync
-from _src.image_transform import transform_image
-from _src.image_generator import ImageGenerator
-
-# Setup
-sync = MusicSync("song.mp3", fps=24)
-sync.load()
-generator = ImageGenerator()
-
-current_image = generator.generate_from_text("landscape", seed=42)
-
-# Animation loop
-for frame_num in range(total_frames):
-    is_beat = sync.is_beat_frame(frame_num)
+    try:
+        from frames_to_video import frames_to_video
+        
+        video_path = OUTPUT_DIR / "transform_video.mp4"
+        frames_to_video(
+            frames_dir=str(OUTPUT_DIR),
+            output_path=str(video_path),
+            fps=FPS
+        )
+        print(f"\n✓ Video created: {video_path}")
+        
+    except ImportError:
+        print("\n💡 Create video with ffmpeg:")
+        print(f"   cd {OUTPUT_DIR}")
+        print(f"   ffmpeg -framerate {FPS} -i frame_%05d.png -c:v libx264 -pix_fmt yuv420p transform_video.mp4")
     
-    # Calculate zoom
-    base_zoom = 1.0 + (frame_num * 0.01)  # Gradual zoom
-    
-    if is_beat:
-        zoom = base_zoom + 0.05  # Extra zoom on beats!
-    else:
-        zoom = base_zoom
-    
-    # Transform previous frame
-    transformed = transform_image(
-        current_image,
-        zoom=zoom,
-        translation_x=2  # Slow pan right
-    )
-    
-    # Generate new frame from transformed
-    strength = sync.get_strength_for_frame(frame_num)
-    current_image = generator.generate_from_image(
-        transformed,
-        prompt="landscape",
-        strength=strength,
-        seed=42 + frame_num
-    )
-```
-
-Effects you'll see:
-✓ Continuous zoom in
-✓ Extra zoom pulse on beats
-✓ Slow pan to the right
-✓ Image changes synced with music
-""")
-
-
-def run_all_tests():
-    """Run all transformation tests"""
-    print("\n" + "=" * 70)
-    print("🎬 IMAGE TRANSFORMATION TESTS")
-    print("=" * 70)
-    
-    # Test 1: Basic transforms
-    test_basic_transformations()
-    
-    # Test 2: Zoom sequence
-    test_zoom_sequence()
-    
-    # Test 3: Beat zoom blueprint
-    test_beat_zoom()
-    
-    print("\n" + "=" * 70)
-    print("✓ All tests complete!")
-    print("=" * 70)
-    print("\n💡 Next steps:")
-    print("  1. Check test_transforms/ for single transform examples")
-    print("  2. Check test_zoom_sequence/ for animation sequence")
-    print("  3. Combine with music_sync for beat-reactive effects")
+    # Summary
+    print(f"\n{'='*70}")
+    print("✅ COMPLETE!")
+    print(f"{'='*70}")
+    print(f"\n🎬 Watch the video to see:")
+    print(f"   - Gradual zoom in effect")
+    print(f"   - Slow pan to the right")
+    print(f"   - Smooth img2img transitions")
+    print(f"\nOutput: {OUTPUT_DIR}/transform_video.mp4")
     print()
 
 
 if __name__ == "__main__":
-    run_all_tests()
+    generate_transform_video()
