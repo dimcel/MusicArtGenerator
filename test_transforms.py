@@ -139,6 +139,7 @@ def generate_transform_video_with_interpolation():
     
     This generates keyframes with transforms, then interpolates between them.
     Much faster than generating every frame!
+    Shows various pan directions (right, left, down, up)
     """
     print("\n" + "=" * 70)
     print("🎬 GENERATING TRANSFORMATION VIDEO (WITH INTERPOLATION)")
@@ -177,7 +178,20 @@ def generate_transform_video_with_interpolation():
     print(f"{'='*70}")
     
     zoom_delta = 1.005  # 0.5% zoom per frame
-    pan_delta = 0.3     # 0.3px pan per frame
+    
+    # Pan pattern: changes direction every 30 frames
+    # Right -> Down -> Left -> Up
+    pan_patterns = [
+        (0.4, 0.0),    # Frames 0-30: Pan right
+        (0.0, 0.4),    # Frames 30-60: Pan down
+        (-0.4, 0.0),   # Frames 60-90: Pan left
+        (0.0, -0.4),   # Frames 90-120: Pan up
+    ]
+    
+    print(f"\nEffects:")
+    print(f"  - Zoom: {(zoom_delta-1)*100:.1f}% per frame")
+    print(f"  - Pan pattern: Right → Down → Left → Up")
+    print(f"  - Direction changes every 30 frames")
     
     keyframes = {}  # {frame_num: image}
     current_image = None
@@ -194,12 +208,17 @@ def generate_transform_video_with_interpolation():
     keyframe_nums = list(range(KEYFRAME_INTERVAL, TOTAL_FRAMES, KEYFRAME_INTERVAL))
     
     for i, frame_num in enumerate(keyframe_nums, start=1):
+        # Determine which pan pattern to use based on frame number
+        pattern_index = min(frame_num // 30, len(pan_patterns) - 1)
+        pan_x, pan_y = pan_patterns[pattern_index]
+        
         # Apply transform KEYFRAME_INTERVAL times
         for _ in range(KEYFRAME_INTERVAL):
             current_image = transform_image(
                 current_image,
                 zoom=zoom_delta,
-                translation_x=pan_delta
+                translation_x=pan_x,
+                translation_y=pan_y
             )
         
         # Generate new keyframe
@@ -211,7 +230,20 @@ def generate_transform_video_with_interpolation():
         )
         
         keyframes[frame_num] = current_image
-        print(f"   ✓ Keyframe {frame_num} generated ({i}/{len(keyframe_nums)})")
+        
+        # Show direction
+        if pan_x > 0:
+            direction = "→ Right"
+        elif pan_x < 0:
+            direction = "← Left"
+        elif pan_y > 0:
+            direction = "↓ Down"
+        elif pan_y < 0:
+            direction = "↑ Up"
+        else:
+            direction = "No pan"
+        
+        print(f"   ✓ Keyframe {frame_num} generated ({i}/{len(keyframe_nums)}) - Pan: {direction}")
     
     print(f"\n✓ Generated {len(keyframes)} keyframes")
     
@@ -289,7 +321,8 @@ def generate_transform_video_with_interpolation():
     print(f"   💰 Cost savings: {savings:.1f}% fewer generations!")
     print(f"\n🎬 Watch the video to see:")
     print(f"   - Smooth zoom with interpolation")
-    print(f"   - Slow pan to the right")
+    print(f"   - Pan pattern: Right → Down → Left → Up")
+    print(f"   - Direction changes every 30 frames")
     print(f"   - Much faster generation!")
     print(f"\nOutput: {OUTPUT_DIR}/transform_video_interp.mp4")
     print()
