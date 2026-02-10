@@ -267,9 +267,9 @@ def generate_transform_video_with_interpolation():
     print(f"{'='*70}")
     
     # Generate keyframes at beat positions WITH VARIABLE TRANSFORMS
-    print(f"\n🎵 Beat-Intensity Modulation (Approach B):")
-    print(f"   Small beats (0.3): subtle zoom, small left pan")
-    print(f"   Big beats (1.0): strong zoom, small right pan")
+    print(f"\n🎵 Beat-Intensity Modulation (Approach B + C):")
+    print(f"   Small beats (0.3): subtle zoom, left pan, medium strength, cfg=7.0")
+    print(f"   Big beats (1.0): strong zoom, right pan, high strength, cfg=10.0")
     print()
     
     keyframe_images = {}  # {frame_num: image}
@@ -297,6 +297,7 @@ def generate_transform_video_with_interpolation():
             pan_x_delta = -0.3   # Small left pan
             angle_delta = -0.1   # Small rotation
             strength = 0.65      # Medium-low strength
+            cfg_scale = 7.0      # Normal guidance (more creative)
             beat_label = "SMALL"
         else:
             # BIG BEAT
@@ -304,6 +305,7 @@ def generate_transform_video_with_interpolation():
             pan_x_delta = 0.5    # Small right pan
             angle_delta = -0.3   # Stronger rotation
             strength = 0.90      # High strength
+            cfg_scale = 10.0     # High guidance (strict prompt adherence)
             beat_label = "BIG"
         
         # Apply transform for each frame between beats
@@ -319,15 +321,13 @@ def generate_transform_video_with_interpolation():
         current_image = generator.generate_from_image(
             init_image=current_image,
             prompt=PROMPT,
-            strength=strength,  # Varies by beat intensity!
-            seed=42 + i * 137  # Seed jump for variety
-            # NOTE: cfg_scale would go here for Approach C
-            # cfg_scale=7.0 + (beat_intensity * 3.0)  # 7.0-10.0 range
-            # Higher cfg_scale = more prompt adherence on strong beats
+            strength=strength,        # Varies by beat intensity!
+            guidance_scale=cfg_scale,  # CFG modulation (Approach C)!
+            seed=42 + i * 137         # Seed jump for variety
         )
         
         keyframe_images[curr_beat] = current_image
-        print(f"   ✓ {beat_label} beat @ frame {curr_beat} (zoom={zoom_delta:.3f}, pan={pan_x_delta:+.1f}px, strength={strength:.2f})")
+        print(f"   ✓ {beat_label} beat @ frame {curr_beat} (zoom={zoom_delta:.3f}, pan={pan_x_delta:+.1f}px, str={strength:.2f}, cfg={cfg_scale:.1f})")
     
     print(f"\n✓ Generated {len(keyframe_images)} beat keyframes")
     
@@ -402,16 +402,20 @@ def generate_transform_video_with_interpolation():
     print(f"   Frames interpolated: {len(all_frames) - len(beat_frames)}")
     print(f"   Total frames: {len(all_frames)}")
     print(f"   💰 Cost savings: {savings:.1f}% fewer generations!")
-    print(f"\n🎵 BEAT-INTENSITY MODULATION (Approach B):")
-    print(f"   - Small beats: subtle zoom (0.8%), left pan, medium strength (0.65)")
-    print(f"   - Big beats: strong zoom (2.0%), right pan, high strength (0.90)")
-    print(f"   - Alternating pattern creates rhythm in visuals")
-    print(f"   - Pan direction changes with beat intensity!")
+    print(f"\n🎵 TRIPLE MODULATION (Approach B + C):")
+    print(f"   Small beats: subtle zoom (0.8%), left pan, strength=0.65, cfg=7.0")
+    print(f"   Big beats: strong zoom (2.0%), right pan, strength=0.90, cfg=10.0")
+    print(f"   ")
+    print(f"   1. STRENGTH: How much image changes")
+    print(f"   2. CFG_SCALE: How focused/sharp the change is")
+    print(f"   3. SEED: What direction it changes")
+    print(f"   ")
     print(f"\n🎬 Watch the video to see:")
     print(f"   - Visual 'pops' synchronized with fake beats")
     print(f"   - DIFFERENT zoom/pan on small vs big beats")
     print(f"   - Left drift on small beats, right drift on big beats")
-    print(f"   - Rotation (counterclockwise turn)")
+    print(f"   - Sharper, more focused images on BIG beats (high cfg)")
+    print(f"   - More creative flow on small beats (low cfg)")
     print(f"\nOutput: {OUTPUT_DIR}/transform_beat_sync.mp4")
     print()
 
