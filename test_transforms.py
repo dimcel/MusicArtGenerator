@@ -230,7 +230,8 @@ def generate_transform_video_with_interpolation():
     print("=" * 70)
     
     # Configuration
-    PROMPT = "old man sitting on bench, peaceful autumn park, afternoon light"
+    PROMPT_SMALL = "old man sitting on bench, peaceful autumn park, afternoon light"
+    PROMPT_BIG = "old man sitting on bench, dramatic autumn park, golden hour, vibrant colors, sunny"
     TOTAL_FRAMES = 120  # 5 seconds at 24fps
     FPS = 24
     BPM = 120  # Fake beats per minute
@@ -240,7 +241,8 @@ def generate_transform_video_with_interpolation():
     beat_frames, beat_intensities = generate_fake_beats(TOTAL_FRAMES, fps=FPS, bpm=BPM)
     
     print(f"\n📋 Configuration:")
-    print(f"   Prompt: {PROMPT}")
+    print(f"   Prompt (small): {PROMPT_SMALL}")
+    print(f"   Prompt (big): {PROMPT_BIG}")
     print(f"   Total frames: {TOTAL_FRAMES} ({TOTAL_FRAMES/FPS:.1f}s)")
     print(f"   BPM (simulated): {BPM}")
     print(f"   Beat frames: {beat_frames}")
@@ -267,16 +269,16 @@ def generate_transform_video_with_interpolation():
     print(f"{'='*70}")
     
     # Generate keyframes at beat positions WITH VARIABLE TRANSFORMS
-    print(f"\n🎵 Beat-Intensity Modulation (Approach B + C):")
-    print(f"   Small beats (0.3): subtle zoom, left pan, medium strength, cfg=7.0")
-    print(f"   Big beats (1.0): strong zoom, right pan, high strength, cfg=10.0")
+    print(f"\n🎵 Beat-Intensity Modulation (B + C + Prompt Change):")
+    print(f"   Small beats: peaceful scene, subtle effects")
+    print(f"   Big beats: DRAMATIC GOLDEN HOUR, strong effects")
     print()
     
     keyframe_images = {}  # {frame_num: image}
     
     # Generate first frame
     current_image = generator.generate_from_text(
-        prompt=PROMPT,
+        prompt=PROMPT_SMALL,
         seed=42
     )
     keyframe_images[0] = current_image
@@ -298,6 +300,7 @@ def generate_transform_video_with_interpolation():
             angle_delta = -0.1   # Small rotation
             strength = 0.65      # Medium-low strength
             cfg_scale = 7.0      # Normal guidance (more creative)
+            prompt = PROMPT_SMALL  # Peaceful scene
             beat_label = "SMALL"
         else:
             # BIG BEAT
@@ -306,6 +309,7 @@ def generate_transform_video_with_interpolation():
             angle_delta = -0.3   # Stronger rotation
             strength = 0.90      # High strength
             cfg_scale = 10.0     # High guidance (strict prompt adherence)
+            prompt = PROMPT_BIG    # Dramatic golden hour!
             beat_label = "BIG"
         
         # Apply transform for each frame between beats
@@ -320,7 +324,7 @@ def generate_transform_video_with_interpolation():
         # Generate new keyframe at beat position
         current_image = generator.generate_from_image(
             init_image=current_image,
-            prompt=PROMPT,
+            prompt=prompt,            # Different prompt per beat type!
             strength=strength,        # Varies by beat intensity!
             guidance_scale=cfg_scale,  # CFG modulation (Approach C)!
             seed=42 + i * 137         # Seed jump for variety
@@ -402,20 +406,20 @@ def generate_transform_video_with_interpolation():
     print(f"   Frames interpolated: {len(all_frames) - len(beat_frames)}")
     print(f"   Total frames: {len(all_frames)}")
     print(f"   💰 Cost savings: {savings:.1f}% fewer generations!")
-    print(f"\n🎵 TRIPLE MODULATION (Approach B + C):")
-    print(f"   Small beats: subtle zoom (0.8%), left pan, strength=0.65, cfg=7.0")
-    print(f"   Big beats: strong zoom (2.0%), right pan, strength=0.90, cfg=10.0")
+    print(f"\n🎵 QUADRUPLE MODULATION (B + C + Prompt):")
+    print(f"   Small beats: subtle zoom, left pan, str=0.65, cfg=7.0, peaceful")
+    print(f"   Big beats: strong zoom, right pan, str=0.90, cfg=10.0, DRAMATIC GOLDEN HOUR")
     print(f"   ")
     print(f"   1. STRENGTH: How much image changes")
     print(f"   2. CFG_SCALE: How focused/sharp the change is")
     print(f"   3. SEED: What direction it changes")
+    print(f"   4. PROMPT: What the image becomes (peaceful vs dramatic!)")
     print(f"   ")
     print(f"\n🎬 Watch the video to see:")
-    print(f"   - Visual 'pops' synchronized with fake beats")
-    print(f"   - DIFFERENT zoom/pan on small vs big beats")
+    print(f"   - VERY OBVIOUS visual changes on big beats (golden hour!)")
+    print(f"   - Peaceful atmosphere on small beats")
     print(f"   - Left drift on small beats, right drift on big beats")
-    print(f"   - Sharper, more focused images on BIG beats (high cfg)")
-    print(f"   - More creative flow on small beats (low cfg)")
+    print(f"   - Content actually changes with the beat intensity")
     print(f"\nOutput: {OUTPUT_DIR}/transform_beat_sync.mp4")
     print()
 
