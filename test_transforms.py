@@ -6,6 +6,43 @@ This shows how to apply Deforum-style transformations:
 1. Take previous frame
 2. Apply transform (zoom/pan/rotate)
 3. Feed into img2img
+
+Current implementation: Approach B - Beat-Intensity Modulation
+- Alternating small/big beats control zoom and pan direction
+- Small beats: subtle zoom, left pan, medium strength
+- Big beats: strong zoom, right pan, high strength
+
+---
+
+APPROACH C - CFG Scale Modulation (Not yet implemented):
+
+What is cfg_scale (Classifier-Free Guidance)?
+--------------------------------------------
+cfg_scale controls how strictly the AI follows your prompt:
+
+- Low (3-5): More creative/random, less adherent to prompt
+- Medium (7-9): Balanced, typical default
+- High (10-15): Very strict prompt adherence, less creative freedom
+
+How it would work with beats:
+- Small beats: cfg_scale = 7.0 (normal adherence)
+- Big beats: cfg_scale = 10.0 (strict adherence)
+
+Result: On strong beats, image follows prompt MORE precisely
+        On weak beats, more artistic interpretation
+
+Example usage:
+    cfg_scale = 7.0 + (beat_intensity * 3.0)  # Range: 7.0-10.0
+    
+This creates visual "focus" on beats - the subject becomes more defined
+and prominent when strong beats hit, while maintaining flow between.
+
+Combined with strength and seed jumps, this creates triple modulation:
+1. strength: how MUCH image changes
+2. seed: what DIRECTION it changes
+3. cfg_scale: how FOCUSED the change is
+
+---
 """
 
 import sys
@@ -20,7 +57,7 @@ from _src.frame_interpolator import FrameInterpolator
 
 def generate_fake_beats(total_frames, fps=24, bpm=120):
     """
-    Generate fake beat positions to simulate librosa beat detection.
+    Generate fake beat positions and intensities to simulate librosa.
     
     This mimics what MusicSync would return, without needing audio files.
     Real beats have slight variations, so we add some randomness.
@@ -31,7 +68,9 @@ def generate_fake_beats(total_frames, fps=24, bpm=120):
         bpm: Beats per minute (approximate)
     
     Returns:
-        List of frame numbers where beats occur
+        Tuple of (beat_frames, beat_intensities)
+        - beat_frames: List of frame numbers where beats occur
+        - beat_intensities: List of intensities (0.0-1.0) for each beat
     """
     import random
     random.seed(42)  # Reproducible
@@ -39,8 +78,11 @@ def generate_fake_beats(total_frames, fps=24, bpm=120):
     # Calculate frames per beat
     frames_per_beat = (60.0 / bpm) * fps
     
-    beats = [0]  # Start with frame 0
+    beat_frames = [0]  # Start with frame 0
+    beat_intensities = [0.5]  # Medium intensity for first frame
+    
     current_frame = 0
+    beat_count = 0
     
     while current_frame < total_frames:
         # Add some variation (±10%) to make it realistic
@@ -48,9 +90,16 @@ def generate_fake_beats(total_frames, fps=24, bpm=120):
         current_frame += int(frames_per_beat + variation)
         
         if current_frame < total_frames:
-            beats.append(current_frame)
+            beat_frames.append(current_frame)
+            
+            # Alternate between small (0.3) and big (1.0) beats
+            beat_count += 1
+            if beat_count % 2 == 1:
+                beat_intensities.append(0.3)  # Small beat
+            else:
+                beat_intensities.append(1.0)  # Big beat
     
-    return beats
+    return beat_frames, beat_intensities
 
 
 def generate_transform_video():
@@ -187,14 +236,15 @@ def generate_transform_video_with_interpolation():
     BPM = 120  # Fake beats per minute
     OUTPUT_DIR = Path("transform_video_interp")
     
-    # Generate fake beats (simulating what librosa would return)
-    beat_frames = generate_fake_beats(TOTAL_FRAMES, fps=FPS, bpm=BPM)
+    # Generate fake beats with intensities (simulating what librosa would return)
+    beat_frames, beat_intensities = generate_fake_beats(TOTAL_FRAMES, fps=FPS, bpm=BPM)
     
     print(f"\n📋 Configuration:")
     print(f"   Prompt: {PROMPT}")
     print(f"   Total frames: {TOTAL_FRAMES} ({TOTAL_FRAMES/FPS:.1f}s)")
     print(f"   BPM (simulated): {BPM}")
     print(f"   Beat frames: {beat_frames}")
+    print(f"   Beat intensities: {['SMALL' if x < 0.5 else 'BIG' for x in beat_intensities]}")
     print(f"   Keyframes to generate: {len(beat_frames)}")
     print(f"   FPS: {FPS}")
     print(f"   Output: {OUTPUT_DIR}/")
@@ -216,25 +266,13 @@ def generate_transform_video_with_interpolation():
     print("STEP 2: Generate Keyframes with Transforms")
     print(f"{'='*70}")
     
-    # Small transforms (subtle effects)
-    # zoom_delta = 1.005  # 0.5% zoom per frame
-    # pan_x_delta = 0.5   # 0.5 pixels right per frame
-    # angle_delta = -0.02  # Small left turn
-    
-    # Strong transforms (dramatic effects)
-    zoom_delta = 1.015  # 1.5% zoom per frame - much more dramatic!
-    pan_x_delta = 1.0   # 1 pixel right per frame
-    angle_delta = -0.2  # Strong left rotation
-    
-    print(f"\nEffects:")
-    print(f"  - Zoom: {(zoom_delta-1)*100:.1f}% per frame")
-    print(f"  - Pan: {pan_x_delta:.1f}px right per frame")
-    print(f"  - Rotation: {angle_delta:.2f}° per frame (counterclockwise)")
-    print(f"  - Total pan: ~{pan_x_delta * TOTAL_FRAMES:.1f}px to the right")
-    print(f"  - Total rotation: ~{angle_delta * TOTAL_FRAMES:.1f}°")
+    # Generate keyframes at beat positions WITH VARIABLE TRANSFORMS
+    print(f"\n🎵 Beat-Intensity Modulation (Approach B):")
+    print(f"   Small beats (0.3): subtle zoom, small left pan")
+    print(f"   Big beats (1.0): strong zoom, small right pan")
+    print()
     
     keyframe_images = {}  # {frame_num: image}
-    current_image = None
     
     # Generate first frame
     current_image = generator.generate_from_text(
@@ -242,13 +280,31 @@ def generate_transform_video_with_interpolation():
         seed=42
     )
     keyframe_images[0] = current_image
-    print(f"   ✓ Beat keyframe 0 generated")
+    print(f"   ✓ Initial frame 0 generated")
     
-    # Generate keyframes at beat positions
     for i in range(1, len(beat_frames)):
         prev_beat = beat_frames[i - 1]
         curr_beat = beat_frames[i]
         frames_between = curr_beat - prev_beat
+        beat_intensity = beat_intensities[i]
+        
+        # Calculate transforms based on beat intensity
+        # Small beat (0.3): subtle zoom, pan left
+        # Big beat (1.0): strong zoom, pan right
+        if beat_intensity < 0.5:
+            # SMALL BEAT
+            zoom_delta = 1.008   # 0.8% zoom per frame
+            pan_x_delta = -0.3   # Small left pan
+            angle_delta = -0.1   # Small rotation
+            strength = 0.65      # Medium-low strength
+            beat_label = "SMALL"
+        else:
+            # BIG BEAT
+            zoom_delta = 1.020   # 2.0% zoom per frame
+            pan_x_delta = 0.5    # Small right pan
+            angle_delta = -0.3   # Stronger rotation
+            strength = 0.90      # High strength
+            beat_label = "BIG"
         
         # Apply transform for each frame between beats
         for _ in range(frames_between):
@@ -259,16 +315,19 @@ def generate_transform_video_with_interpolation():
                 translation_x=pan_x_delta
             )
         
-        # Generate new keyframe at beat position with HIGH strength
+        # Generate new keyframe at beat position
         current_image = generator.generate_from_image(
             init_image=current_image,
             prompt=PROMPT,
-            strength=0.85,  # HIGH on beats (sd-parseq style!)
+            strength=strength,  # Varies by beat intensity!
             seed=42 + i * 137  # Seed jump for variety
+            # NOTE: cfg_scale would go here for Approach C
+            # cfg_scale=7.0 + (beat_intensity * 3.0)  # 7.0-10.0 range
+            # Higher cfg_scale = more prompt adherence on strong beats
         )
         
         keyframe_images[curr_beat] = current_image
-        print(f"   ✓ Beat keyframe {curr_beat} generated ({i}/{len(beat_frames)-1})")
+        print(f"   ✓ {beat_label} beat @ frame {curr_beat} (zoom={zoom_delta:.3f}, pan={pan_x_delta:+.1f}px, strength={strength:.2f})")
     
     print(f"\n✓ Generated {len(keyframe_images)} beat keyframes")
     
@@ -343,16 +402,16 @@ def generate_transform_video_with_interpolation():
     print(f"   Frames interpolated: {len(all_frames) - len(beat_frames)}")
     print(f"   Total frames: {len(all_frames)}")
     print(f"   💰 Cost savings: {savings:.1f}% fewer generations!")
-    print(f"\n🎵 BEAT-SYNC EFFECT:")
-    print(f"   - Keyframes generated AT BEAT POSITIONS (not fixed interval!)")
-    print(f"   - High strength (0.85) on beats = more dramatic changes")
-    print(f"   - Seed jumps on beats for variation")
-    print(f"   - Transforms accumulate between beats")
+    print(f"\n🎵 BEAT-INTENSITY MODULATION (Approach B):")
+    print(f"   - Small beats: subtle zoom (0.8%), left pan, medium strength (0.65)")
+    print(f"   - Big beats: strong zoom (2.0%), right pan, high strength (0.90)")
+    print(f"   - Alternating pattern creates rhythm in visuals")
+    print(f"   - Pan direction changes with beat intensity!")
     print(f"\n🎬 Watch the video to see:")
     print(f"   - Visual 'pops' synchronized with fake beats")
-    print(f"   - Strong zoom in with interpolation")
+    print(f"   - DIFFERENT zoom/pan on small vs big beats")
+    print(f"   - Left drift on small beats, right drift on big beats")
     print(f"   - Rotation (counterclockwise turn)")
-    print(f"   - Pan to the right")
     print(f"\nOutput: {OUTPUT_DIR}/transform_beat_sync.mp4")
     print()
 
