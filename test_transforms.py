@@ -177,13 +177,22 @@ def generate_transform_video_with_interpolation():
     print("STEP 2: Generate Keyframes with Transforms")
     print(f"{'='*70}")
     
-    zoom_delta = 1.005  # 0.5% zoom per frame
-    pan_x_delta = 0.5   # 0.5 pixels right per frame
+    # Small transforms (subtle effects)
+    # zoom_delta = 1.005  # 0.5% zoom per frame
+    # pan_x_delta = 0.5   # 0.5 pixels right per frame
+    # angle_delta = -0.02  # Small left turn
+    
+    # Strong transforms (dramatic effects)
+    zoom_delta = 1.015  # 1.5% zoom per frame - much more dramatic!
+    pan_x_delta = 1.0   # 1 pixel right per frame
+    angle_delta = -0.2  # Strong left rotation
     
     print(f"\nEffects:")
     print(f"  - Zoom: {(zoom_delta-1)*100:.1f}% per frame")
     print(f"  - Pan: {pan_x_delta:.1f}px right per frame")
+    print(f"  - Rotation: {angle_delta:.2f}° per frame (counterclockwise)")
     print(f"  - Total pan: ~{pan_x_delta * TOTAL_FRAMES:.1f}px to the right")
+    print(f"  - Total rotation: ~{angle_delta * TOTAL_FRAMES:.1f}°")
     
     keyframes = {}  # {frame_num: image}
     current_image = None
@@ -200,11 +209,12 @@ def generate_transform_video_with_interpolation():
     keyframe_nums = list(range(KEYFRAME_INTERVAL, TOTAL_FRAMES, KEYFRAME_INTERVAL))
     
     for i, frame_num in enumerate(keyframe_nums, start=1):
-        # Apply transform KEYFRAME_INTERVAL times (constant pan right)
+        # Apply transform KEYFRAME_INTERVAL times (zoom + pan + rotate)
         for _ in range(KEYFRAME_INTERVAL):
             current_image = transform_image(
                 current_image,
                 zoom=zoom_delta,
+                angle=angle_delta,
                 translation_x=pan_x_delta
             )
         
@@ -294,8 +304,9 @@ def generate_transform_video_with_interpolation():
     print(f"   Total frames: {len(all_frames)}")
     print(f"   💰 Cost savings: {savings:.1f}% fewer generations!")
     print(f"\n🎬 Watch the video to see:")
-    print(f"   - Smooth zoom in with interpolation")
-    print(f"   - Steady pan to the right")
+    print(f"   - Strong zoom in with interpolation")
+    print(f"   - Rotation (counterclockwise turn)")
+    print(f"   - Pan to the right")
     print(f"   - Much faster generation!")
     print(f"\nOutput: {OUTPUT_DIR}/transform_video_interp.mp4")
     print()
