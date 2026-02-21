@@ -30,6 +30,7 @@ def generate_fake_music_track(
     fps: int = 24,
     total_frames: int = 120,
     sample_rate: int = 44100,
+    profile: str = "base",
 ) -> str:
     """
     Generate a synthetic beat-driven audio file.
@@ -80,6 +81,18 @@ def generate_fake_music_track(
         arp_gate = 1.0 if (t * 8.0) % 1.0 < 0.18 else 0.0
         arp = 0.05 * arp_gate * math.sin(2.0 * math.pi * arp_f * t)
 
+        # Extra rhythmic content for extended profile.
+        extra = 0.0
+        if profile == "extended":
+            # Off-beat clap/noise hit every half beat.
+            offbeat_phase = (t * 4.0) % 1.0
+            if offbeat_phase < 0.05:
+                extra += 0.06 * (2.0 * random.random() - 1.0) * math.exp(-offbeat_phase * 40.0)
+
+            # Slow wobble layer to make section changes obvious.
+            wobble = 0.04 * math.sin(2.0 * math.pi * (0.18 + 0.06 * math.sin(2 * math.pi * 0.03 * t)) * t)
+            extra += wobble
+
         beat_sig = 0.0
         for bt, inten in beat_events:
             dt = t - bt
@@ -109,7 +122,7 @@ def generate_fake_music_track(
                     sweep_env = (1.0 - pre / 0.16) ** 2
                     beat_sig += 0.05 * sweep_env * math.sin(2.0 * math.pi * sweep_f * t)
 
-        x = drone + pad + bass + arp + hiss + 0.55 * beat_sig
+        x = drone + pad + bass + arp + hiss + 0.55 * beat_sig + extra
         x = _soft_clip(x)
         x = max(-1.0, min(1.0, x))
         pcm.append(int(x * 32767.0))
