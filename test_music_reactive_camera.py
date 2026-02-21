@@ -100,23 +100,42 @@ def build_camera_scheduler(total_frames, beat_frames, intensity="strong"):
                 clamp=(-4.0, 4.0),
             ),
         }
-    else:
+    elif intensity == "strong":
         specs = {
             "zoom": ParameterSpec(
-                expression="1.004 + 0.010*beat_pulse + 0.004*sin(2*pi*t*2.4)",
-                clamp=(0.99, 1.05),
+                expression="1.010 + 0.020*beat_pulse + 0.007*sin(2*pi*t*2.4)",
+                clamp=(0.97, 1.08),
             ),
             "angle": ParameterSpec(
-                expression="1.6*sin(2*pi*t*1.6) + 2.8*beat_pulse",
-                clamp=(-6.0, 6.0),
+                expression="2.8*sin(2*pi*t*1.6) + 4.8*beat_pulse",
+                clamp=(-10.0, 10.0),
             ),
             "tx": ParameterSpec(
-                expression="2.8*sin(2*pi*t*2.2) + 3.2*(beat_pulse-0.25)",
-                clamp=(-12.0, 12.0),
+                expression="4.2*sin(2*pi*t*2.2) + 5.2*(beat_pulse-0.25)",
+                clamp=(-20.0, 20.0),
             ),
             "ty": ParameterSpec(
-                expression="1.5*cos(2*pi*t*1.4) + 2.6*beat_pulse",
-                clamp=(-8.0, 8.0),
+                expression="2.2*cos(2*pi*t*1.4) + 4.0*beat_pulse",
+                clamp=(-14.0, 14.0),
+            ),
+        }
+    else:  # extreme
+        specs = {
+            "zoom": ParameterSpec(
+                expression="1.016 + 0.030*beat_pulse + 0.012*sin(2*pi*t*2.8)",
+                clamp=(0.94, 1.12),
+            ),
+            "angle": ParameterSpec(
+                expression="4.0*sin(2*pi*t*1.8) + 8.0*beat_pulse",
+                clamp=(-18.0, 18.0),
+            ),
+            "tx": ParameterSpec(
+                expression="7.0*sin(2*pi*t*2.5) + 8.5*(beat_pulse-0.2)",
+                clamp=(-34.0, 34.0),
+            ),
+            "ty": ParameterSpec(
+                expression="4.0*cos(2*pi*t*1.6) + 6.5*beat_pulse",
+                clamp=(-24.0, 24.0),
             ),
         }
     return ParseqLikeScheduler(specs=specs, beat_frames=beat_frames)
@@ -173,16 +192,32 @@ def run(profile="extended", camera_intensity="strong", with_audio=False):
             all_frames.extend(interpolator.interpolate(keyframes[a_num], keyframes[b_num], between))
     all_frames.append(keyframes[beat_frames[-1]])
 
-    # Camera pass on EVERY final frame.
+    # Camera pass on EVERY final frame with cumulative motion.
+    # This makes zoom/pan/rotation much more obvious than per-frame-only warps.
     camera_frames = []
+    zoom_acc = 1.0
+    angle_acc = 0.0
+    tx_acc = 0.0
+    ty_acc = 0.0
     for i, frame in enumerate(all_frames):
         c = cam_sched.frame_params(i, total_frames)
+        zoom_acc *= c["zoom"]
+        angle_acc += c["angle"] * 0.25
+        tx_acc += c["tx"] * 0.35
+        ty_acc += c["ty"] * 0.35
+
+        # Keep cumulative camera state bounded.
+        zoom_acc = max(0.65, min(2.8, zoom_acc))
+        angle_acc = max(-35.0, min(35.0, angle_acc))
+        tx_acc = max(-180.0, min(180.0, tx_acc))
+        ty_acc = max(-160.0, min(160.0, ty_acc))
+
         cam_frame = transform_image(
             frame,
-            zoom=c["zoom"],
-            angle=c["angle"],
-            translation_x=c["tx"],
-            translation_y=c["ty"],
+            zoom=zoom_acc,
+            angle=angle_acc,
+            translation_x=tx_acc,
+            translation_y=ty_acc,
         )
         camera_frames.append(cam_frame)
 
@@ -225,8 +260,7 @@ def run(profile="extended", camera_intensity="strong", with_audio=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=["base", "extended"], default="extended")
-    parser.add_argument("--camera-intensity", choices=["subtle", "strong"], default="strong")
+    parser.add_argument("--camera-intensity", choices=["subtle", "strong", "extreme"], default="strong")
     parser.add_argument("--with-audio", action="store_true")
     args = parser.parse_args()
     run(profile=args.profile, camera_intensity=args.camera_intensity, with_audio=args.with_audio)
-
