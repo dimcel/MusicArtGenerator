@@ -231,6 +231,8 @@ def generate_transform_video_with_interpolation():
     
     # Configuration
     PROMPT_SMALL = "old man sitting on bench, peaceful autumn park, afternoon light"
+    # PROMPT_SMALL = "old man sitting on bench, snowed park, night light"
+
     PROMPT_BIG = "old man sitting on bench, dramatic autumn park, golden hour, vibrant colors, sunny"
     TOTAL_FRAMES = 120  # 5 seconds at 24fps
     FPS = 24
