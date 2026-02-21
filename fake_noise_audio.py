@@ -1,10 +1,13 @@
 """
 Fake Music / Noise Generator for Sync Testing.
 
-Creates a synthetic WAV track with:
+    Creates a synthetic WAV track with:
 - low drone
 - noise texture
 - beat-aligned kick/snare/hat pulses
+- moving bassline
+- simple arpeggio sparkle
+- occasional sweep risers
 
 Designed for quick A/V sync tests without real music files.
 """
@@ -65,6 +68,18 @@ def generate_fake_music_track(
         pad = 0.08 * math.sin(2.0 * math.pi * (110.0 + 10.0 * math.sin(2 * math.pi * 0.07 * t)) * t)
         hiss = 0.02 * (2.0 * random.random() - 1.0)
 
+        # Musical layers for clearer sync perception.
+        beat_index = int(t * 2.0)  # slow harmonic movement
+        bass_notes = [41.2, 49.0, 55.0, 65.4]  # E1, G1, A1, C2
+        bass_f = bass_notes[beat_index % len(bass_notes)]
+        bass = 0.10 * math.sin(2.0 * math.pi * bass_f * t)
+
+        arp_notes = [220.0, 277.2, 329.6, 440.0]
+        arp_step = int(t * 8.0)
+        arp_f = arp_notes[arp_step % len(arp_notes)]
+        arp_gate = 1.0 if (t * 8.0) % 1.0 < 0.18 else 0.0
+        arp = 0.05 * arp_gate * math.sin(2.0 * math.pi * arp_f * t)
+
         beat_sig = 0.0
         for bt, inten in beat_events:
             dt = t - bt
@@ -86,7 +101,15 @@ def generate_fake_music_track(
 
             beat_sig += (0.45 + 0.65 * inten) * kick + 0.22 * snare + 0.08 * hat
 
-        x = drone + pad + hiss + 0.55 * beat_sig
+            # Small riser before stronger beats.
+            if inten >= 0.8:
+                pre = bt - t
+                if 0.0 < pre < 0.16:
+                    sweep_f = 350.0 + 850.0 * (1.0 - pre / 0.16)
+                    sweep_env = (1.0 - pre / 0.16) ** 2
+                    beat_sig += 0.05 * sweep_env * math.sin(2.0 * math.pi * sweep_f * t)
+
+        x = drone + pad + bass + arp + hiss + 0.55 * beat_sig
         x = _soft_clip(x)
         x = max(-1.0, min(1.0, x))
         pcm.append(int(x * 32767.0))
@@ -113,4 +136,3 @@ if __name__ == "__main__":
         total_frames=120,
     )
     print(f"Created {out}")
-
