@@ -115,7 +115,7 @@ def build_scheduler(total_frames, beat_frames, preset="strong"):
     return ParseqLikeScheduler(specs=specs, beat_frames=beat_frames)
 
 
-def choose_prompt(frame_num, total_frames, beat_intensity):
+def choose_prompt(frame_num, total_frames, beat_intensity, profile="base"):
     """
     Creative scene schedule:
     - 4 time-based phases
@@ -124,18 +124,32 @@ def choose_prompt(frame_num, total_frames, beat_intensity):
     phase = min(3, int((4 * frame_num) / max(1, total_frames)))
     is_big = beat_intensity >= 0.5
 
-    small_prompts = [
-        "old man sitting on bench, quiet autumn park, soft afternoon light, cinematic",
-        "old man on bench near city trees, blue dusk haze, moody atmosphere, film still",
-        "old man on bench in light rain, reflective puddles, neon reflections, cinematic realism",
-        "old man on bench at dawn, misty golden fog, hopeful mood, high detail",
-    ]
-    big_prompts = [
-        "old man sitting on bench, dramatic golden hour burst, wind in leaves, vibrant cinematic grade",
-        "old man on bench in city park, dramatic blue-orange contrast, headlights streaks, intense mood",
-        "old man on bench in stormy rain, lightning glow, wet pavement shine, dramatic cinematic realism",
-        "old man on bench at sunrise explosion, volumetric god rays, epic color contrast, sharp detail",
-    ]
+    if profile == "extended":
+        small_prompts = [
+            "elderly violinist on a park bench, autumn leaves, soft afternoon light, cinematic realism",
+            "young street dancer in a city plaza, blue dusk haze, subtle motion blur, film still",
+            "female astronaut walking in shallow water on an alien shoreline, bioluminescent mist, cinematic",
+            "samurai standing in tall grass at dawn, fog and warm rim light, high detail cinematic frame",
+        ]
+        big_prompts = [
+            "elderly violinist on a park bench, dramatic golden rays, swirling leaves, high contrast cinematic grade",
+            "young street dancer mid-spin under neon signs, intense blue-orange lighting, dynamic action frame",
+            "female astronaut running across an alien shore during electric storm, lightning sky, dramatic epic look",
+            "samurai charging through dawn fog with flying cloth and dust, volumetric god rays, sharp cinematic detail",
+        ]
+    else:
+        small_prompts = [
+            "old man sitting on bench, quiet autumn park, soft afternoon light, cinematic",
+            "old man on bench near city trees, blue dusk haze, moody atmosphere, film still",
+            "old man on bench in light rain, reflective puddles, neon reflections, cinematic realism",
+            "old man on bench at dawn, misty golden fog, hopeful mood, high detail",
+        ]
+        big_prompts = [
+            "old man sitting on bench, dramatic golden hour burst, wind in leaves, vibrant cinematic grade",
+            "old man on bench in city park, dramatic blue-orange contrast, headlights streaks, intense mood",
+            "old man on bench in stormy rain, lightning glow, wet pavement shine, dramatic cinematic realism",
+            "old man on bench at sunrise explosion, volumetric god rays, epic color contrast, sharp detail",
+        ]
     return big_prompts[phase] if is_big else small_prompts[phase]
 
 
@@ -169,7 +183,7 @@ def generate_transform_video_parseq_like(preset="strong", with_audio=False, prof
     keyframe_images = {}
 
     # Frame 0
-    first_prompt = choose_prompt(0, total_frames, beat_intensities[0])
+    first_prompt = choose_prompt(0, total_frames, beat_intensities[0], profile=profile)
     current_image = generator.generate_from_text(prompt=first_prompt, seed=42)
     keyframe_images[0] = current_image
     print("\nGenerated initial frame 0")
@@ -192,7 +206,7 @@ def generate_transform_video_parseq_like(preset="strong", with_audio=False, prof
 
         beat_params = scheduler.frame_params(curr_beat, total_frames)
         beat_intensity = beat_intensities[i]
-        prompt = choose_prompt(curr_beat, total_frames, beat_intensity)
+        prompt = choose_prompt(curr_beat, total_frames, beat_intensity, profile=profile)
         prompt_label = "BIG" if beat_intensity >= 0.5 else "SMALL"
         strength = min(0.97, beat_params["strength"] + 0.15 * beat_intensity)
         cfg_scale = min(13.0, beat_params["cfg_scale"] + 1.8 * beat_intensity)
