@@ -6,8 +6,11 @@ parseq-like scheduler to drive per-frame parameters.
 
 Run:
     python test_transforms_parseq_like.py
+    python test_transforms_parseq_like.py --preset strong --with-audio
 """
 
+import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -42,7 +45,7 @@ def generate_fake_beats(total_frames, fps=24, bpm=120):
     return beat_frames, beat_intensities
 
 
-def build_scheduler(total_frames, beat_frames):
+def build_scheduler(total_frames, beat_frames, preset="strong"):
     """
     Build a simple parseq-like schedule for transform/generation params.
 
@@ -50,43 +53,68 @@ def build_scheduler(total_frames, beat_frames):
     - keyframe curves define slow global trends
     - beat_pulse adds local modulation near beats
     """
-    specs = {
-        "zoom_delta": ParameterSpec(
-            keyframes=[(0, 1.006), (total_frames // 2, 1.012), (total_frames - 1, 1.007)],
-            easing="ease_in_out",
-            beat_pulse_amount=0.008,
-            beat_pulse_decay_frames=2,
-            clamp=(1.001, 1.03),
-        ),
-        "pan_x_delta": ParameterSpec(
-            expression="0.25*sin(2*pi*t*1.7) + 0.45*(beat_pulse - 0.3)",
-            clamp=(-0.6, 0.8),
-        ),
-        "angle_delta": ParameterSpec(
-            expression="-0.05 + 0.3*beat_pulse",
-            clamp=(-0.2, 0.5),
-        ),
-        "strength": ParameterSpec(
-            keyframes=[(0, 0.55), (total_frames // 2, 0.7), (total_frames - 1, 0.6)],
-            easing="ease_in_out",
-            beat_pulse_amount=0.16,
-            beat_pulse_decay_frames=2,
-            clamp=(0.35, 0.92),
-        ),
-        "cfg_scale": ParameterSpec(
-            expression="7.2 + 1.3*sin(2*pi*t) + 1.8*beat_pulse",
-            clamp=(6.0, 11.0),
-        ),
-        # Used for prompt switching at keyframes.
-        "dramatic_score": ParameterSpec(
-            expression="0.2 + 1.1*beat_pulse",
-            clamp=(0.0, 1.3),
-        ),
-    }
+    if preset == "subtle":
+        specs = {
+            "zoom_delta": ParameterSpec(
+                keyframes=[(0, 1.005), (total_frames // 2, 1.010), (total_frames - 1, 1.006)],
+                easing="ease_in_out",
+                beat_pulse_amount=0.006,
+                beat_pulse_decay_frames=2,
+                clamp=(1.001, 1.02),
+            ),
+            "pan_x_delta": ParameterSpec(
+                expression="0.22*sin(2*pi*t*1.4) + 0.35*(beat_pulse - 0.3)",
+                clamp=(-0.6, 0.7),
+            ),
+            "angle_delta": ParameterSpec(
+                expression="-0.04 + 0.20*beat_pulse",
+                clamp=(-0.2, 0.35),
+            ),
+            "strength": ParameterSpec(
+                keyframes=[(0, 0.52), (total_frames // 2, 0.66), (total_frames - 1, 0.58)],
+                easing="ease_in_out",
+                beat_pulse_amount=0.12,
+                beat_pulse_decay_frames=2,
+                clamp=(0.35, 0.9),
+            ),
+            "cfg_scale": ParameterSpec(
+                expression="7.0 + 1.0*sin(2*pi*t) + 1.2*beat_pulse",
+                clamp=(6.0, 10.5),
+            ),
+        }
+    else:
+        specs = {
+            "zoom_delta": ParameterSpec(
+                keyframes=[(0, 1.010), (total_frames // 2, 1.024), (total_frames - 1, 1.012)],
+                easing="ease_in_out",
+                beat_pulse_amount=0.012,
+                beat_pulse_decay_frames=2,
+                clamp=(1.003, 1.04),
+            ),
+            "pan_x_delta": ParameterSpec(
+                expression="0.55*sin(2*pi*t*1.9) + 0.80*(beat_pulse - 0.25)",
+                clamp=(-1.4, 1.5),
+            ),
+            "angle_delta": ParameterSpec(
+                expression="-0.08 + 0.55*beat_pulse",
+                clamp=(-0.35, 0.9),
+            ),
+            "strength": ParameterSpec(
+                keyframes=[(0, 0.62), (total_frames // 2, 0.82), (total_frames - 1, 0.70)],
+                easing="ease_in_out",
+                beat_pulse_amount=0.20,
+                beat_pulse_decay_frames=2,
+                clamp=(0.45, 0.96),
+            ),
+            "cfg_scale": ParameterSpec(
+                expression="7.4 + 1.8*sin(2*pi*t) + 2.4*beat_pulse",
+                clamp=(6.2, 12.5),
+            ),
+        }
     return ParseqLikeScheduler(specs=specs, beat_frames=beat_frames)
 
 
-def generate_transform_video_parseq_like():
+def generate_transform_video_parseq_like(preset="strong", with_audio=False):
     print("\n" + "=" * 70)
     print("GENERATING PARSEQ-LIKE TRANSFORM VIDEO")
     print("=" * 70)
@@ -97,21 +125,22 @@ def generate_transform_video_parseq_like():
     total_frames = 120
     fps = 24
     bpm = 120
-    output_dir = Path("transform_video_parseq_like")
+    output_dir = Path(f"transform_video_parseq_like_{preset}")
 
     beat_frames, beat_intensities = generate_fake_beats(total_frames, fps=fps, bpm=bpm)
-    scheduler = build_scheduler(total_frames=total_frames, beat_frames=beat_frames)
+    scheduler = build_scheduler(total_frames=total_frames, beat_frames=beat_frames, preset=preset)
 
     print("\nConfiguration:")
     print(f"  Frames: {total_frames} ({total_frames / fps:.1f}s)")
     print(f"  FPS: {fps}")
+    print(f"  Preset: {preset}")
     print(f"  Beat frames: {beat_frames}")
     print(f"  Beat sizes: {['SMALL' if x < 0.5 else 'BIG' for x in beat_intensities]}")
     print(f"  Output: {output_dir}/")
 
     gen_config = ImageGenerationConfig(width=512, height=512)
     generator = ImageGenerator(gen_config)
-    interpolator = FrameInterpolator(method="blend")
+    interpolator = FrameInterpolator(method="optical_flow")
     output_dir.mkdir(exist_ok=True)
 
     keyframe_images = {}
@@ -137,14 +166,17 @@ def generate_transform_video_parseq_like():
             )
 
         beat_params = scheduler.frame_params(curr_beat, total_frames)
-        prompt = prompt_big if beat_params["dramatic_score"] >= 0.7 else prompt_small
-        prompt_label = "BIG" if prompt == prompt_big else "SMALL"
+        beat_intensity = beat_intensities[i]
+        prompt = prompt_big if beat_intensity >= 0.5 else prompt_small
+        prompt_label = "BIG" if beat_intensity >= 0.5 else "SMALL"
+        strength = min(0.97, beat_params["strength"] + 0.15 * beat_intensity)
+        cfg_scale = min(13.0, beat_params["cfg_scale"] + 1.8 * beat_intensity)
 
         current_image = generator.generate_from_image(
             init_image=current_image,
             prompt=prompt,
-            strength=beat_params["strength"],
-            guidance_scale=beat_params["cfg_scale"],
+            strength=strength,
+            guidance_scale=cfg_scale,
             seed=42 + i * 137,
         )
 
@@ -154,7 +186,7 @@ def generate_transform_video_parseq_like():
             f"zoom={beat_params['zoom_delta']:.4f}, "
             f"pan={beat_params['pan_x_delta']:+.3f}, "
             f"rot={beat_params['angle_delta']:+.3f}, "
-            f"str={beat_params['strength']:.3f}, cfg={beat_params['cfg_scale']:.2f}"
+            f"str={strength:.3f}, cfg={cfg_scale:.2f}"
         )
 
     # Interpolate between keyframes
@@ -182,13 +214,36 @@ def generate_transform_video_parseq_like():
     try:
         from frames_to_video import frames_to_video
 
-        video_path = output_dir / "transform_parseq_like.mp4"
+        video_path = output_dir / f"transform_parseq_like_{preset}.mp4"
         frames_to_video(
             frames_dir=str(output_dir),
             output_path=str(video_path),
             fps=fps,
         )
         print(f"\nVideo created: {video_path}")
+
+        if with_audio:
+            from fake_noise_audio import generate_fake_music_track
+
+            audio_path = output_dir / "fake_music.wav"
+            generate_fake_music_track(
+                output_path=str(audio_path),
+                beat_frames=beat_frames,
+                beat_intensities=beat_intensities,
+                fps=fps,
+                total_frames=total_frames,
+            )
+
+            muxed_path = output_dir / f"transform_parseq_like_{preset}_with_audio.mp4"
+            cmd = (
+                f'ffmpeg -y -i "{video_path}" -i "{audio_path}" '
+                f'-c:v copy -c:a aac -shortest "{muxed_path}"'
+            )
+            result = os.system(cmd)
+            if result == 0:
+                print(f"Audio muxed video: {muxed_path}")
+            else:
+                print("Could not mux audio with ffmpeg. Video and wav are still saved.")
     except ImportError:
         print("\nCreate video with ffmpeg:")
         print(f"  cd {output_dir}")
@@ -201,5 +256,8 @@ def generate_transform_video_parseq_like():
 
 
 if __name__ == "__main__":
-    generate_transform_video_parseq_like()
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--preset", choices=["subtle", "strong"], default="strong")
+    parser.add_argument("--with-audio", action="store_true")
+    args = parser.parse_args()
+    generate_transform_video_parseq_like(preset=args.preset, with_audio=args.with_audio)
