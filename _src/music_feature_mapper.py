@@ -81,6 +81,37 @@ def calibrate_feature_curve(
     return out.astype(np.float32)
 
 
+def smooth_curve(curve: np.ndarray, window: int = 41) -> np.ndarray:
+    """
+    Simple moving-average smoothing.
+    """
+    x = np.asarray(curve, dtype=np.float32)
+    if x.size == 0 or window <= 1:
+        return x
+    w = max(1, int(window))
+    kernel = np.ones(w, dtype=np.float32) / float(w)
+    return np.convolve(x, kernel, mode="same").astype(np.float32)
+
+
+def build_subject_drive_curve(
+    energy_curve: np.ndarray,
+    brightness_curve: np.ndarray,
+    pitch_curve: np.ndarray,
+    smoothing_window: int = 41,
+) -> np.ndarray:
+    """
+    Build a slow-changing subject-drive signal in [0, 1].
+    Deliberately excludes beat/onset so subject identity changes slowly.
+    """
+    x = (
+        0.45 * np.asarray(energy_curve, dtype=np.float32)
+        + 0.30 * np.asarray(brightness_curve, dtype=np.float32)
+        + 0.25 * np.asarray(pitch_curve, dtype=np.float32)
+    )
+    x = np.clip(x, 0.0, 1.0).astype(np.float32)
+    return smooth_curve(x, window=smoothing_window)
+
+
 def map_frame_to_controls(
     frame: int,
     total_frames: int,
@@ -144,9 +175,9 @@ def map_frame_to_controls(
     )
     noise_amount = _clamp(noise_amount, cfg.noise_min, cfg.noise_max)
 
-    # Prompt drive in [0, 1], then bucketed for discrete mode.
+    # Prompt drive for subject identity in [0, 1], intentionally beat-free.
     prompt_drive = _clamp(
-        0.35 * energy + 0.25 * brightness + 0.20 * pitch + 0.20 * beat_pulse,
+        0.45 * energy + 0.30 * brightness + 0.25 * pitch,
         0.0,
         1.0,
     )
