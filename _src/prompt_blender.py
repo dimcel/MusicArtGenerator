@@ -13,22 +13,22 @@ import math
 @dataclass
 class PromptBlendConfig:
     subjects: tuple = (
-        "elderly violinist",
-        "young street dancer",
-        "female astronaut",
-        "samurai warrior",
+        "middle-aged man sitting on a wooden bench",
+        "middle-aged man resting on a park bench",
+        "middle-aged man seated quietly on a bench",
+        "middle-aged man on a bench, thoughtful expression",
     )
     scenes: tuple = (
-        "in an autumn park with cinematic soft light",
-        "in a neon city plaza at blue dusk",
-        "on an alien shoreline with bioluminescent mist",
-        "in a dawn field with fog and volumetric rays",
+        "in an autumn park with soft afternoon light",
+        "in the same park near dusk with gentle haze",
+        "in the same park after light rain, reflective ground",
+        "in the same park at dawn with mild fog and warm rim light",
     )
     moods: tuple = (
-        "calm atmospheric composition, cinematic realism",
-        "cinematic realism, detailed",
-        "energetic dynamic composition, sharp details",
-        "dramatic high-contrast action frame",
+        "calm cinematic realism, natural details",
+        "cinematic realism, high detail, stable composition",
+        "slightly energetic composition, crisp detail",
+        "dramatic but realistic cinematic grade, controlled contrast",
     )
 
 
@@ -99,4 +99,3 @@ def build_blended_prompt(
         f"{primary}. Secondary influence ({blend_w:.2f}): {secondary}. "
         f"Keep the primary subject identity stable."
     )
-
