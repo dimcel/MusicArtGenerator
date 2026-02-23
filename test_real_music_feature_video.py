@@ -20,47 +20,12 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT / "_src"))
 
 from audio_feature_extractor import AudioFeatureExtractor
+from cadence_coherence import CadenceCoherence
 from image_generator import ImageGenerationConfig, ImageGenerator
 from image_noise import add_gaussian_noise
 from image_transform import transform_image
 from music_feature_mapper import MusicMappingConfig, calibrate_feature_curve, map_frame_to_controls
-
-
-def choose_prompt(
-    prompt_level: int,
-    frame: int,
-    total_frames: int,
-    beat_pulse: float,
-    pitch: float,
-) -> str:
-    # Subject driven by audio level.
-    subjects = [
-        "elderly violinist",
-        "young street dancer",
-        "female astronaut",
-        "samurai warrior",
-    ]
-    subject = subjects[max(0, min(3, int(prompt_level)))]
-
-    # Scene driven by timeline phase.
-    phase = min(3, int((4 * frame) / max(1, total_frames)))
-    scenes = [
-        "in an autumn park with cinematic soft light",
-        "in a neon city plaza at blue dusk",
-        "on an alien shoreline with bioluminescent mist",
-        "in a dawn field with fog and volumetric rays",
-    ]
-    scene = scenes[phase]
-
-    if beat_pulse > 0.65:
-        mood = "dramatic high-contrast action frame"
-    elif pitch > 0.66:
-        mood = "energetic dynamic composition, sharp details"
-    elif pitch < 0.33:
-        mood = "calm atmospheric composition, cinematic realism"
-    else:
-        mood = "cinematic realism, detailed"
-    return f"{subject}, {scene}, {mood}"
+from prompt_blender import build_blended_prompt, build_discrete_prompt
 
 
 def run(
@@ -68,6 +33,8 @@ def run(
     fps: int = 24,
     mode: str = "full",
     cadence: int = 3,
+    prompt_mode: str = "blend",
+    coherence: str = "blend",
     max_seconds: float = 12.0,
     with_audio: bool = True,
 ):
@@ -96,9 +63,11 @@ def run(
     print(f"Audio: {audio_path}")
     print(f"Duration used: {total_frames / fps:.2f}s ({total_frames} frames @ {fps}fps)")
     print(f"BPM: {features.bpm:.1f}, beats: {len(features.beat_frames)}")
-    print(f"Mode: {mode}, cadence: {cadence}, output: {output_dir}/")
+    print(f"Mode: {mode}, cadence: {cadence}, prompt_mode: {prompt_mode}, coherence: {coherence}")
+    print(f"Output: {output_dir}/")
 
     generator = ImageGenerator(ImageGenerationConfig(width=512, height=512))
+    coherence_helper = CadenceCoherence(method=coherence, blend_alpha=0.35)
 
     first_controls = map_frame_to_controls(
         frame=0,
@@ -110,13 +79,22 @@ def run(
         beat_pulse=float(features.beat_pulse[0]),
         cfg=mapper_cfg,
     )
-    first_prompt = choose_prompt(
-        prompt_level=int(first_controls["prompt_level"]),
-        frame=0,
-        total_frames=total_frames,
-        beat_pulse=float(features.beat_pulse[0]),
-        pitch=float(pitch_curve[0]),
-    )
+    if prompt_mode == "blend":
+        first_prompt = build_blended_prompt(
+            prompt_drive=float(first_controls["prompt_drive"]),
+            frame=0,
+            total_frames=total_frames,
+            beat_pulse=float(features.beat_pulse[0]),
+            pitch=float(pitch_curve[0]),
+        )
+    else:
+        first_prompt = build_discrete_prompt(
+            prompt_level=int(first_controls["prompt_level"]),
+            frame=0,
+            total_frames=total_frames,
+            beat_pulse=float(features.beat_pulse[0]),
+            pitch=float(pitch_curve[0]),
+        )
     current = generator.generate_from_text(prompt=first_prompt, seed=42)
     current.save(output_dir / "frame_00000.png")
 
@@ -140,13 +118,22 @@ def run(
             translation_y=controls["ty_delta"],
         )
 
-        prompt = choose_prompt(
-            prompt_level=int(controls["prompt_level"]),
-            frame=frame,
-            total_frames=total_frames,
-            beat_pulse=float(features.beat_pulse[frame]),
-            pitch=float(pitch_curve[frame]),
-        )
+        if prompt_mode == "blend":
+            prompt = build_blended_prompt(
+                prompt_drive=float(controls["prompt_drive"]),
+                frame=frame,
+                total_frames=total_frames,
+                beat_pulse=float(features.beat_pulse[frame]),
+                pitch=float(pitch_curve[frame]),
+            )
+        else:
+            prompt = build_discrete_prompt(
+                prompt_level=int(controls["prompt_level"]),
+                frame=frame,
+                total_frames=total_frames,
+                beat_pulse=float(features.beat_pulse[frame]),
+                pitch=float(pitch_curve[frame]),
+            )
 
         do_diffuse = (mode == "full") or (frame in beat_set) or (frame % max(1, cadence) == 0)
         if do_diffuse:
@@ -160,7 +147,7 @@ def run(
                 seed=seed,
             )
         else:
-            current = transformed
+            current = coherence_helper.apply(prev_frame=current, transformed_frame=transformed)
 
         current.save(output_dir / f"frame_{frame:05d}.png")
 
@@ -197,6 +184,8 @@ if __name__ == "__main__":
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--mode", choices=["full", "cadence"], default="full")
     parser.add_argument("--cadence", type=int, default=3)
+    parser.add_argument("--prompt-mode", choices=["blend", "hard"], default="blend")
+    parser.add_argument("--coherence", choices=["none", "blend", "optical_flow"], default="blend")
     parser.add_argument(
         "--max-seconds",
         type=float,
@@ -211,6 +200,8 @@ if __name__ == "__main__":
         fps=args.fps,
         mode=args.mode,
         cadence=args.cadence,
+        prompt_mode=args.prompt_mode,
+        coherence=args.coherence,
         max_seconds=args.max_seconds,
         with_audio=args.with_audio,
     )

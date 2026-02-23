@@ -144,8 +144,12 @@ def map_frame_to_controls(
     )
     noise_amount = _clamp(noise_amount, cfg.noise_min, cfg.noise_max)
 
-    # Prompt profile index (0..3): small on calm frames, bigger on intense frames.
-    prompt_drive = 0.35 * energy + 0.25 * brightness + 0.20 * pitch + 0.20 * beat_pulse
+    # Prompt drive in [0, 1], then bucketed for discrete mode.
+    prompt_drive = _clamp(
+        0.35 * energy + 0.25 * brightness + 0.20 * pitch + 0.20 * beat_pulse,
+        0.0,
+        1.0,
+    )
     prompt_level = int(_clamp(prompt_drive * 4.0, 0, 3))
 
     # Seed drift: more jumps when onsets/beat spike.
@@ -159,6 +163,7 @@ def map_frame_to_controls(
         "ty_delta": 0.35 * tx_delta,
         "angle_delta": angle_delta,
         "noise_amount": noise_amount,
+        "prompt_drive": prompt_drive,
         "prompt_level": prompt_level,
         "seed_jump": seed_jump,
     }
