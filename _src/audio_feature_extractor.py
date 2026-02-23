@@ -27,6 +27,7 @@ class AudioFrameFeatures:
     energy: np.ndarray
     onset: np.ndarray
     brightness: np.ndarray
+    pitch: np.ndarray
 
 
 def _normalize(arr: np.ndarray) -> np.ndarray:
@@ -120,20 +121,41 @@ class AudioFeatureExtractor:
         rms = librosa.feature.rms(y=self.y)[0]
         onset_env = librosa.onset.onset_strength(y=self.y, sr=self.sr)
         centroid = librosa.feature.spectral_centroid(y=self.y, sr=self.sr)[0]
+        f0 = librosa.yin(
+            self.y,
+            fmin=librosa.note_to_hz("C2"),
+            fmax=librosa.note_to_hz("C7"),
+            sr=self.sr,
+            hop_length=512,
+        )
 
         rms_t = librosa.frames_to_time(np.arange(len(rms)), sr=self.sr)
         onset_t = librosa.frames_to_time(np.arange(len(onset_env)), sr=self.sr)
         cent_t = librosa.frames_to_time(np.arange(len(centroid)), sr=self.sr)
+        pitch_t = librosa.times_like(f0, sr=self.sr, hop_length=512)
         frame_t = np.arange(total_frames, dtype=np.float32) / float(self.fps)
 
         energy = np.interp(frame_t, rms_t, _normalize(rms)).astype(np.float32)
         onset = np.interp(frame_t, onset_t, _normalize(onset_env)).astype(np.float32)
         brightness = np.interp(frame_t, cent_t, _normalize(centroid)).astype(np.float32)
 
+        # Fill invalid pitch values before normalization/interpolation.
+        f0 = np.asarray(f0, dtype=np.float32)
+        valid = np.isfinite(f0) & (f0 > 0)
+        if np.any(valid):
+            idx = np.arange(len(f0))
+            f0_filled = np.interp(idx, idx[valid], f0[valid]).astype(np.float32)
+            # Log-frequency better matches perceived pitch change.
+            pitch_norm_src = _normalize(np.log2(np.maximum(f0_filled, 1e-6)))
+        else:
+            pitch_norm_src = np.zeros_like(f0, dtype=np.float32)
+        pitch = np.interp(frame_t, pitch_t, pitch_norm_src).astype(np.float32)
+
         # Small smoothing for stability.
         energy = _smooth(energy, win=5).astype(np.float32)
         onset = _smooth(onset, win=3).astype(np.float32)
         brightness = _smooth(brightness, win=7).astype(np.float32)
+        pitch = _smooth(pitch, win=7).astype(np.float32)
 
         return AudioFrameFeatures(
             fps=self.fps,
@@ -145,5 +167,5 @@ class AudioFeatureExtractor:
             energy=energy,
             onset=onset,
             brightness=brightness,
+            pitch=pitch,
         )
-

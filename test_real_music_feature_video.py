@@ -21,11 +21,18 @@ sys.path.insert(0, str(ROOT / "_src"))
 
 from audio_feature_extractor import AudioFeatureExtractor
 from image_generator import ImageGenerationConfig, ImageGenerator
+from image_noise import add_gaussian_noise
 from image_transform import transform_image
-from music_feature_mapper import MusicMappingConfig, map_frame_to_controls
+from music_feature_mapper import MusicMappingConfig, calibrate_feature_curve, map_frame_to_controls
 
 
-def choose_prompt(prompt_level: int, frame: int, total_frames: int, beat_pulse: float) -> str:
+def choose_prompt(
+    prompt_level: int,
+    frame: int,
+    total_frames: int,
+    beat_pulse: float,
+    pitch: float,
+) -> str:
     # Subject driven by audio level.
     subjects = [
         "elderly violinist",
@@ -45,7 +52,14 @@ def choose_prompt(prompt_level: int, frame: int, total_frames: int, beat_pulse: 
     ]
     scene = scenes[phase]
 
-    mood = "dramatic high-contrast action frame" if beat_pulse > 0.65 else "cinematic realism, detailed"
+    if beat_pulse > 0.65:
+        mood = "dramatic high-contrast action frame"
+    elif pitch > 0.66:
+        mood = "energetic dynamic composition, sharp details"
+    elif pitch < 0.33:
+        mood = "calm atmospheric composition, cinematic realism"
+    else:
+        mood = "cinematic realism, detailed"
     return f"{subject}, {scene}, {mood}"
 
 
@@ -69,6 +83,12 @@ def run(
     beat_set = set(features.beat_frames)
     mapper_cfg = MusicMappingConfig()
 
+    # Per-track robust normalization (simple auto-calibration).
+    energy_curve = calibrate_feature_curve(features.energy, low_q=0.05, high_q=0.98, gamma=1.0)
+    onset_curve = calibrate_feature_curve(features.onset, low_q=0.20, high_q=0.995, gamma=1.15)
+    bright_curve = calibrate_feature_curve(features.brightness, low_q=0.05, high_q=0.98, gamma=1.0)
+    pitch_curve = calibrate_feature_curve(features.pitch, low_q=0.10, high_q=0.95, gamma=1.0)
+
     safe_name = Path(audio_path).stem.replace(" ", "_")
     output_dir = Path(f"real_music_feature_video_{safe_name}_{mode}_{total_frames}f")
     output_dir.mkdir(exist_ok=True)
@@ -83,9 +103,10 @@ def run(
     first_controls = map_frame_to_controls(
         frame=0,
         total_frames=total_frames,
-        energy=float(features.energy[0]),
-        onset=float(features.onset[0]),
-        brightness=float(features.brightness[0]),
+        energy=float(energy_curve[0]),
+        onset=float(onset_curve[0]),
+        brightness=float(bright_curve[0]),
+        pitch=float(pitch_curve[0]),
         beat_pulse=float(features.beat_pulse[0]),
         cfg=mapper_cfg,
     )
@@ -94,6 +115,7 @@ def run(
         frame=0,
         total_frames=total_frames,
         beat_pulse=float(features.beat_pulse[0]),
+        pitch=float(pitch_curve[0]),
     )
     current = generator.generate_from_text(prompt=first_prompt, seed=42)
     current.save(output_dir / "frame_00000.png")
@@ -102,9 +124,10 @@ def run(
         controls = map_frame_to_controls(
             frame=frame,
             total_frames=total_frames,
-            energy=float(features.energy[frame]),
-            onset=float(features.onset[frame]),
-            brightness=float(features.brightness[frame]),
+            energy=float(energy_curve[frame]),
+            onset=float(onset_curve[frame]),
+            brightness=float(bright_curve[frame]),
+            pitch=float(pitch_curve[frame]),
             beat_pulse=float(features.beat_pulse[frame]),
             cfg=mapper_cfg,
         )
@@ -122,13 +145,15 @@ def run(
             frame=frame,
             total_frames=total_frames,
             beat_pulse=float(features.beat_pulse[frame]),
+            pitch=float(pitch_curve[frame]),
         )
 
         do_diffuse = (mode == "full") or (frame in beat_set) or (frame % max(1, cadence) == 0)
         if do_diffuse:
             seed = 42 + frame * 97 + int(controls["seed_jump"])
+            noised = add_gaussian_noise(transformed, amount=controls["noise_amount"], seed=seed + 17)
             current = generator.generate_from_image(
-                init_image=transformed,
+                init_image=noised,
                 prompt=prompt,
                 strength=controls["strength"],
                 guidance_scale=controls["cfg_scale"],
@@ -143,9 +168,9 @@ def run(
             beat_tag = "BEAT" if frame in beat_set else "-"
             print(
                 f"{frame:>4}/{total_frames-1} [{beat_tag}] "
-                f"eng={features.energy[frame]:.2f} onset={features.onset[frame]:.2f} "
+                f"eng={energy_curve[frame]:.2f} onset={onset_curve[frame]:.2f} pitch={pitch_curve[frame]:.2f} "
                 f"str={controls['strength']:.3f} cfg={controls['cfg_scale']:.2f} "
-                f"zoom={controls['zoom_delta']:.4f} pan={controls['tx_delta']:+.2f}"
+                f"zoom={controls['zoom_delta']:.4f} pan={controls['tx_delta']:+.2f} noise={controls['noise_amount']:.3f}"
             )
 
     from frames_to_video import frames_to_video
@@ -189,4 +214,3 @@ if __name__ == "__main__":
         max_seconds=args.max_seconds,
         with_audio=args.with_audio,
     )
-

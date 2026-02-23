@@ -7,6 +7,8 @@ Maps frame-aligned audio features to video generation controls.
 from dataclasses import dataclass
 from typing import Dict
 
+import numpy as np
+
 
 @dataclass
 class MusicMappingConfig:
@@ -18,6 +20,7 @@ class MusicMappingConfig:
     cfg_base: float = 7.0
     cfg_brightness_boost: float = 2.0
     cfg_beat_boost: float = 1.6
+    cfg_pitch_boost: float = 1.0
 
     # Camera deltas applied before img2img
     zoom_base: float = 1.003
@@ -32,6 +35,11 @@ class MusicMappingConfig:
     angle_onset_boost: float = 3.0
     angle_wave_amp: float = 1.8
 
+    # Noise to encourage new detail discovery
+    noise_base: float = 0.00
+    noise_onset_boost: float = 0.05
+    noise_beat_boost: float = 0.04
+
     # Clamp ranges
     strength_min: float = 0.42
     strength_max: float = 0.97
@@ -41,10 +49,36 @@ class MusicMappingConfig:
     zoom_max: float = 1.05
     pan_abs_max: float = 10.0
     angle_abs_max: float = 8.0
+    noise_min: float = 0.0
+    noise_max: float = 0.20
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, float(v)))
+
+
+def calibrate_feature_curve(
+    curve: np.ndarray,
+    low_q: float = 0.05,
+    high_q: float = 0.95,
+    gamma: float = 1.0,
+) -> np.ndarray:
+    """
+    Percentile normalization for robust per-track mapping.
+    Returns values in [0, 1].
+    """
+    x = np.asarray(curve, dtype=np.float32)
+    if x.size == 0:
+        return x
+    lo = float(np.quantile(x, low_q))
+    hi = float(np.quantile(x, high_q))
+    if hi - lo < 1e-8:
+        out = np.zeros_like(x, dtype=np.float32)
+    else:
+        out = np.clip((x - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+    if abs(gamma - 1.0) > 1e-6:
+        out = np.power(out, gamma, dtype=np.float32)
+    return out.astype(np.float32)
 
 
 def map_frame_to_controls(
@@ -53,6 +87,7 @@ def map_frame_to_controls(
     energy: float,
     onset: float,
     brightness: float,
+    pitch: float,
     beat_pulse: float,
     cfg: MusicMappingConfig = None,
 ) -> Dict[str, float]:
@@ -76,6 +111,7 @@ def map_frame_to_controls(
     cfg_scale = (
         cfg.cfg_base
         + cfg.cfg_brightness_boost * brightness
+        + cfg.cfg_pitch_boost * pitch
         + cfg.cfg_beat_boost * beat_pulse
     )
     cfg_scale = _clamp(cfg_scale, cfg.cfg_min, cfg.cfg_max)
@@ -101,8 +137,15 @@ def map_frame_to_controls(
     )
     angle_delta = _clamp(angle_delta, -cfg.angle_abs_max, cfg.angle_abs_max)
 
+    noise_amount = (
+        cfg.noise_base
+        + cfg.noise_onset_boost * onset
+        + cfg.noise_beat_boost * beat_pulse
+    )
+    noise_amount = _clamp(noise_amount, cfg.noise_min, cfg.noise_max)
+
     # Prompt profile index (0..3): small on calm frames, bigger on intense frames.
-    prompt_drive = 0.45 * energy + 0.35 * brightness + 0.20 * beat_pulse
+    prompt_drive = 0.35 * energy + 0.25 * brightness + 0.20 * pitch + 0.20 * beat_pulse
     prompt_level = int(_clamp(prompt_drive * 4.0, 0, 3))
 
     # Seed drift: more jumps when onsets/beat spike.
@@ -115,6 +158,7 @@ def map_frame_to_controls(
         "tx_delta": tx_delta,
         "ty_delta": 0.35 * tx_delta,
         "angle_delta": angle_delta,
+        "noise_amount": noise_amount,
         "prompt_level": prompt_level,
         "seed_jump": seed_jump,
     }
