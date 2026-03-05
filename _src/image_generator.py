@@ -15,7 +15,13 @@ from PIL import Image
 from typing import Optional
 from dataclasses import dataclass
 
-from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderKL, StableDiffusionPipeline
+from diffusers import (
+    AutoencoderKL,
+    ControlNetModel,
+    StableDiffusionControlNetImg2ImgPipeline,
+    StableDiffusionImg2ImgPipeline,
+    StableDiffusionPipeline,
+)
 
 #TODO check to see GOLD Standard for dataclass --> and diffefence with enums
 @dataclass
@@ -25,6 +31,15 @@ class ImageGenerationConfig:
     model_id: str = "SG161222/Realistic_Vision_V5.1_noVAE"
     vae_id: str = "stabilityai/sd-vae-ft-mse"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # ControlNet settings
+    enable_controlnet: bool = False
+    controlnet_type: str = "canny"
+    controlnet_model_id: str = "lllyasviel/sd-controlnet-canny"
+    controlnet_default_scale: float = 0.85
+    controlnet_guess_mode: bool = False
+    controlnet_conditioning_start: float = 0.0
+    controlnet_conditioning_end: float = 1.0
     
     # Generation defaults
     width: int = 512
@@ -65,13 +80,62 @@ class ImageGenerator:
         self.config = config or ImageGenerationConfig()
         self._txt2img_pipe = None
         self._img2img_pipe = None
+        self._controlnet_img2img_pipe = None
+        self._warned_controlnet_family_mismatch = False
         
         print(f"🎨 Image Generator")
         print(f"   Device: {self.config.device}")
         print(f"   Model: {self.config.model_id}")
+        if self.config.enable_controlnet:
+            print(f"   ControlNet: {self.config.controlnet_model_id} ({self.config.controlnet_type})")
+            self._warn_controlnet_family_mismatch()
         
-        # Load img2img pipeline (most common)
-        self._load_img2img_pipeline()
+        # Preload the most likely image-to-image pipeline.
+        if self.config.enable_controlnet:
+            self._load_controlnet_img2img_pipeline()
+        else:
+            self._load_img2img_pipeline()
+
+    def _torch_dtype(self):
+        return torch.float16 if self.config.device == "cuda" else torch.float32
+
+    def _load_vae(self):
+        return AutoencoderKL.from_pretrained(
+            self.config.vae_id,
+            torch_dtype=self._torch_dtype(),
+        )
+
+    def _optimize_pipeline(self, pipe):
+        if self.config.device != "cuda":
+            return
+        pipe.enable_attention_slicing()
+        try:
+            pipe.enable_xformers_memory_efficient_attention()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _infer_model_family(model_id: str) -> str:
+        model = (model_id or "").lower()
+        if "sdxl" in model or "xl" in model:
+            return "sdxl"
+        if "2.1" in model or "2-1" in model or "v2" in model:
+            return "sd2"
+        return "sd1"
+
+    def _warn_controlnet_family_mismatch(self):
+        if self._warned_controlnet_family_mismatch:
+            return
+        base_family = self._infer_model_family(self.config.model_id)
+        control_family = self._infer_model_family(self.config.controlnet_model_id)
+        if base_family != control_family:
+            print(
+                "⚠️  Model family mismatch detected: "
+                f"base='{self.config.model_id}' ({base_family}) vs "
+                f"controlnet='{self.config.controlnet_model_id}' ({control_family}). "
+                "Generation may fail or produce poor results."
+            )
+            self._warned_controlnet_family_mismatch = True
     
     def _load_txt2img_pipeline(self):
         """Load text-to-image pipeline (lazy loading)"""
@@ -82,28 +146,20 @@ class ImageGenerator:
         print("   Loading txt2img pipeline...")
         
         # Load VAE
-        vae = AutoencoderKL.from_pretrained(
-            self.config.vae_id,
-            torch_dtype=torch.float16 if self.config.device == "cuda" else torch.float32
-        )
+        vae = self._load_vae()
         
         # Load pipeline
         self._txt2img_pipe = StableDiffusionPipeline.from_pretrained(
             self.config.model_id,
             vae=vae,
-            torch_dtype=torch.float16 if self.config.device == "cuda" else torch.float32,
+            torch_dtype=self._torch_dtype(),
             safety_checker=None,
             requires_safety_checker=False
         )
         self._txt2img_pipe = self._txt2img_pipe.to(self.config.device)
         
         # Enable optimizations
-        if self.config.device == "cuda":
-            self._txt2img_pipe.enable_attention_slicing()
-            try:
-                self._txt2img_pipe.enable_xformers_memory_efficient_attention()
-            except Exception:
-                pass
+        self._optimize_pipeline(self._txt2img_pipe)
         
         print("txt2img ready")
     
@@ -115,30 +171,53 @@ class ImageGenerator:
         print("Loading img2img pipeline...")
         
         # Load VAE
-        vae = AutoencoderKL.from_pretrained(
-            self.config.vae_id,
-            torch_dtype=torch.float16 if self.config.device == "cuda" else torch.float32
-        )
+        vae = self._load_vae()
         
         # Load pipeline
         self._img2img_pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
             self.config.model_id,
             vae=vae,
-            torch_dtype=torch.float16 if self.config.device == "cuda" else torch.float32,
+            torch_dtype=self._torch_dtype(),
             safety_checker=None,
             requires_safety_checker=False
         )
         self._img2img_pipe = self._img2img_pipe.to(self.config.device)
         
         # Enable optimizations
-        if self.config.device == "cuda":
-            self._img2img_pipe.enable_attention_slicing()
-            try:
-                self._img2img_pipe.enable_xformers_memory_efficient_attention()
-            except Exception:
-                pass
+        self._optimize_pipeline(self._img2img_pipe)
         
         print("   ✓ img2img ready")
+
+    def _load_controlnet_img2img_pipeline(self):
+        """Load image-to-image pipeline with ControlNet."""
+        if self._controlnet_img2img_pipe is not None:
+            return
+        if self.config.controlnet_type != "canny":
+            raise ValueError(
+                f"Unsupported controlnet_type='{self.config.controlnet_type}'. "
+                "Only 'canny' is supported in this implementation."
+            )
+
+        print("Loading ControlNet img2img pipeline...")
+        self._warn_controlnet_family_mismatch()
+
+        vae = self._load_vae()
+        controlnet = ControlNetModel.from_pretrained(
+            self.config.controlnet_model_id,
+            torch_dtype=self._torch_dtype(),
+        )
+
+        self._controlnet_img2img_pipe = StableDiffusionControlNetImg2ImgPipeline.from_pretrained(
+            self.config.model_id,
+            vae=vae,
+            controlnet=controlnet,
+            torch_dtype=self._torch_dtype(),
+            safety_checker=None,
+            requires_safety_checker=False,
+        )
+        self._controlnet_img2img_pipe = self._controlnet_img2img_pipe.to(self.config.device)
+        self._optimize_pipeline(self._controlnet_img2img_pipe)
+        print("   ✓ ControlNet img2img ready")
     
     def generate_from_text(
         self,
@@ -202,7 +281,9 @@ class ImageGenerator:
         negative_prompt: str = None,
         guidance_scale: float = None,
         num_inference_steps: int = None,
-        seed: int = None
+        seed: int = None,
+        control_image: Optional[Image.Image] = None,
+        controlnet_conditioning_scale: Optional[float] = None,
     ) -> Image.Image:
         """
         Generate image from existing image (image-to-image).
@@ -221,8 +302,6 @@ class ImageGenerator:
         Returns:
             Generated PIL Image
         """
-        self._load_img2img_pipeline()
-        
         # Use config defaults if not specified
         negative_prompt = negative_prompt or self.config.negative_prompt
         guidance_scale = guidance_scale or self.config.guidance_scale
@@ -232,17 +311,44 @@ class ImageGenerator:
         generator = None
         if seed is not None:
             generator = torch.Generator(device=self.config.device).manual_seed(seed)
-        
-        # Generate image
-        result = self._img2img_pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            image=init_image,
-            strength=strength,
-            guidance_scale=guidance_scale,
-            num_inference_steps=num_inference_steps,
-            generator=generator
-        )
+
+        if self.config.enable_controlnet:
+            if control_image is None:
+                raise ValueError(
+                    "ControlNet is enabled but no control_image was provided. "
+                    "Pass a conditioning image (for example, canny edges)."
+                )
+            self._load_controlnet_img2img_pipeline()
+            conditioning_scale = (
+                self.config.controlnet_default_scale
+                if controlnet_conditioning_scale is None
+                else float(controlnet_conditioning_scale)
+            )
+            result = self._controlnet_img2img_pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                image=init_image,
+                control_image=control_image,
+                strength=strength,
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_inference_steps,
+                generator=generator,
+                guess_mode=self.config.controlnet_guess_mode,
+                controlnet_conditioning_scale=conditioning_scale,
+                control_guidance_start=float(self.config.controlnet_conditioning_start),
+                control_guidance_end=float(self.config.controlnet_conditioning_end),
+            )
+        else:
+            self._load_img2img_pipeline()
+            result = self._img2img_pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                image=init_image,
+                strength=strength,
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_inference_steps,
+                generator=generator
+            )
         
         return result.images[0]
     
@@ -255,6 +361,10 @@ class ImageGenerator:
         if self._img2img_pipe is not None:
             del self._img2img_pipe
             self._img2img_pipe = None
+
+        if self._controlnet_img2img_pipe is not None:
+            del self._controlnet_img2img_pipe
+            self._controlnet_img2img_pipe = None
         
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

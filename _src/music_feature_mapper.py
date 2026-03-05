@@ -40,6 +40,11 @@ class MusicMappingConfig:
     noise_onset_boost: float = 0.05
     noise_beat_boost: float = 0.04
 
+    # ControlNet conditioning scale
+    control_scale_base: float = 0.80
+    control_scale_onset_boost: float = 0.20
+    control_scale_beat_boost: float = 0.30
+
     # Clamp ranges
     strength_min: float = 0.42
     strength_max: float = 0.97
@@ -51,6 +56,8 @@ class MusicMappingConfig:
     angle_abs_max: float = 8.0
     noise_min: float = 0.0
     noise_max: float = 0.20
+    control_scale_min: float = 0.20
+    control_scale_max: float = 1.60
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -144,6 +151,13 @@ def map_frame_to_controls(
     )
     noise_amount = _clamp(noise_amount, cfg.noise_min, cfg.noise_max)
 
+    control_scale = (
+        cfg.control_scale_base
+        + cfg.control_scale_onset_boost * onset
+        + cfg.control_scale_beat_boost * beat_pulse
+    )
+    control_scale = _clamp(control_scale, cfg.control_scale_min, cfg.control_scale_max)
+
     # Prompt drive in [0, 1], then bucketed for discrete mode.
     prompt_drive = _clamp(
         0.35 * energy + 0.25 * brightness + 0.20 * pitch + 0.20 * beat_pulse,
@@ -163,6 +177,7 @@ def map_frame_to_controls(
         "ty_delta": 0.35 * tx_delta,
         "angle_delta": angle_delta,
         "noise_amount": noise_amount,
+        "control_scale": control_scale,
         "prompt_drive": prompt_drive,
         "prompt_level": prompt_level,
         "seed_jump": seed_jump,
