@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "_src"))
 
 from audio_feature_extractor import AudioFeatureExtractor
 from cadence_coherence import CadenceCoherence
+from controlnet_conditioning import build_canny_control_image
 from image_generator import ImageGenerationConfig, ImageGenerator
 from image_noise import add_gaussian_noise
 from image_transform import transform_image
@@ -49,6 +50,13 @@ def run(
     subject_smoothing_window: int = 41,
     max_seconds: float = 12.0,
     with_audio: bool = True,
+    use_controlnet: bool = False,
+    controlnet_model: str = "lllyasviel/sd-controlnet-canny",
+    control_scale_base: float = 0.80,
+    control_scale_beat_boost: float = 0.30,
+    control_scale_onset_boost: float = 0.20,
+    canny_low: int = 100,
+    canny_high: int = 200,
 ):
     extractor = AudioFeatureExtractor(audio_path=audio_path, fps=fps).load()
 
@@ -60,7 +68,11 @@ def run(
 
     features = extractor.extract(total_frames=total_frames)
     beat_set = set(features.beat_frames)
-    mapper_cfg = MusicMappingConfig()
+    mapper_cfg = MusicMappingConfig(
+        control_scale_base=float(control_scale_base),
+        control_scale_beat_boost=float(control_scale_beat_boost),
+        control_scale_onset_boost=float(control_scale_onset_boost),
+    )
 
     # Per-track robust normalization (simple auto-calibration).
     energy_curve = calibrate_feature_curve(features.energy, low_q=0.05, high_q=0.98, gamma=1.0)
@@ -82,9 +94,25 @@ def run(
     print(f"Duration used: {total_frames / fps:.2f}s ({total_frames} frames @ {fps}fps)")
     print(f"BPM: {features.bpm:.1f}, beats: {len(features.beat_frames)}")
     print(f"Mode: {mode}, cadence: {cadence}, prompt_mode: {prompt_mode}, coherence: {coherence}")
+    print(
+        f"ControlNet: {'ON' if use_controlnet else 'OFF'}"
+        + (
+            f" (model={controlnet_model}, canny={canny_low}:{canny_high})"
+            if use_controlnet
+            else ""
+        )
+    )
     print(f"Output: {output_dir}/")
 
-    generator = ImageGenerator(ImageGenerationConfig(width=512, height=512))
+    generator = ImageGenerator(
+        ImageGenerationConfig(
+            width=512,
+            height=512,
+            enable_controlnet=use_controlnet,
+            controlnet_type="canny",
+            controlnet_model_id=controlnet_model,
+        )
+    )
     coherence_helper = CadenceCoherence(method=coherence, blend_alpha=0.35)
     subject_controller = SubjectTransitionController(
         num_subjects=4,
@@ -195,12 +223,23 @@ def run(
                 noise_amount = min(noise_amount, 0.05)
 
             noised = add_gaussian_noise(transformed, amount=noise_amount, seed=seed + 17)
+            seed = 42 + frame * 97 + int(controls["seed_jump"])
+            control_image = None
+            if use_controlnet:
+                control_image = build_canny_control_image(
+                    transformed,
+                    low_threshold=canny_low,
+                    high_threshold=canny_high,
+                )
+            noised = add_gaussian_noise(transformed, amount=controls["noise_amount"], seed=seed + 17)
             current = generator.generate_from_image(
                 init_image=noised,
                 prompt=prompt,
                 strength=strength,
                 guidance_scale=cfg_scale,
                 seed=seed,
+                control_image=control_image,
+                controlnet_conditioning_scale=controls["control_scale"],
             )
         else:
             current = coherence_helper.apply(prev_frame=current, transformed_frame=transformed)
@@ -215,6 +254,8 @@ def run(
                 f"str={controls['strength']:.3f} cfg={controls['cfg_scale']:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan={controls['tx_delta']:+.2f} "
                 f"noise={controls['noise_amount']:.3f} trans={int(transition_active)}"
+                f"noise={controls['noise_amount']:.3f} cscale={controls['control_scale']:.3f} "
+                f"cn={'ON' if use_controlnet else 'OFF'}"
             )
 
     from frames_to_video import frames_to_video
@@ -253,6 +294,18 @@ if __name__ == "__main__":
         help="Limit runtime by using only first N seconds. <=0 means full audio.",
     )
     parser.add_argument("--with-audio", action="store_true")
+    parser.add_argument("--controlnet", action="store_true", help="Enable ControlNet img2img (canny).")
+    parser.add_argument(
+        "--controlnet-model",
+        type=str,
+        default="lllyasviel/sd-controlnet-canny",
+        help="ControlNet model id.",
+    )
+    parser.add_argument("--control-scale-base", type=float, default=0.80)
+    parser.add_argument("--control-scale-beat-boost", type=float, default=0.30)
+    parser.add_argument("--control-scale-onset-boost", type=float, default=0.20)
+    parser.add_argument("--canny-low", type=int, default=100)
+    parser.add_argument("--canny-high", type=int, default=200)
     args = parser.parse_args()
 
     run(
@@ -267,4 +320,11 @@ if __name__ == "__main__":
         subject_smoothing_window=args.subject_smoothing_window,
         max_seconds=args.max_seconds,
         with_audio=args.with_audio,
+        use_controlnet=args.controlnet,
+        controlnet_model=args.controlnet_model,
+        control_scale_base=args.control_scale_base,
+        control_scale_beat_boost=args.control_scale_beat_boost,
+        control_scale_onset_boost=args.control_scale_onset_boost,
+        canny_low=args.canny_low,
+        canny_high=args.canny_high,
     )
