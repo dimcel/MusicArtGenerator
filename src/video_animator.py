@@ -14,7 +14,7 @@ from PIL import Image
 from typing import List, Optional
 from dataclasses import dataclass
 
-from _src.image_generator import ImageGenerator, ImageGenerationConfig
+from src.image_generator import ImageGenerator, ImageGenerationConfig
 
 
 @dataclass

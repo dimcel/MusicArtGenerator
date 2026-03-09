@@ -48,11 +48,11 @@ Combined with strength and seed jumps, this creates triple modulation:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _src.image_generator import ImageGenerator, ImageGenerationConfig
-from _src.image_transform import transform_image
-from _src.frame_interpolator import FrameInterpolator
+from src.image_generator import ImageGenerator, ImageGenerationConfig
+from src.image_transform import transform_image
+from src.frame_interpolator import FrameInterpolator
 
 
 def generate_fake_beats(total_frames, fps=24, bpm=120):

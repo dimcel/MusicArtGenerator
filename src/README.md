@@ -1,4 +1,4 @@
-# Refactored Code Structure (_src)
+# Refactored Code Structure (src)
 
 ## Overview
 Clean, step-by-step refactoring following best coding principles.
@@ -21,7 +21,7 @@ Each module can be tested independently.
 
 ## Module 1: Image Generator ✅
 
-**File:** `_src/image_generator.py`
+**File:** `src/image_generator.py`
 
 **Responsibility:** Generate images using Stable Diffusion
 
@@ -34,7 +34,7 @@ Each module can be tested independently.
 
 **API:**
 ```python
-from _src.image_generator import ImageGenerator, ImageGenerationConfig
+from src.image_generator import ImageGenerator, ImageGenerationConfig
 
 # Configure
 config = ImageGenerationConfig(
@@ -76,7 +76,7 @@ next_image = generator.generate_from_image(
 
 Run the test:
 ```bash
-python test_image_generator.py
+python test/test_image_generator.py
 ```
 
 This will:
@@ -87,7 +87,7 @@ This will:
 
 **For Colab:**
 ```python
-!python test_image_generator.py
+!python test/test_image_generator.py
 
 # View results
 from IPython.display import Image
@@ -150,9 +150,9 @@ src/
 - ❌ Tight coupling between modules
 - ❌ Difficult to modify without breaking things
 
-### New Structure (`_src/`)
+### New Structure (`src/`)
 ```
-_src/
+src/
 ├── image_generator.py      # ONLY generates images (250 lines)
 │   ├── txt2img
 │   └── img2img
@@ -222,7 +222,7 @@ Each module gets its own test:
 
 ```bash
 # Test image generation
-python test_image_generator.py
+python test/test_image_generator.py
 
 # Test frame transformation (coming)
 python test_frame_transformer.py

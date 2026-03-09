@@ -14,9 +14,9 @@ import sys
 from pathlib import Path
 
 # Add _src to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _src.music_sync import MusicSync, simple_beat_detection
+from src.music_sync import MusicSync, simple_beat_detection
 
 
 def test_beat_detection_only():
@@ -166,9 +166,9 @@ def test_example_workflow():
 Example workflow for music-synced video generation:
 
 ```python
-from _src.music_sync import MusicSync
-from _src.video_animator import VideoAnimator
-from _src.frame_interpolator import FrameInterpolator
+from src.music_sync import MusicSync
+from src.video_animator import VideoAnimator
+from src.frame_interpolator import FrameInterpolator
 
 # 1. Set up music sync
 sync = MusicSync("song.mp3", fps=24)

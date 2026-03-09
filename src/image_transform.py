@@ -6,7 +6,7 @@ Similar to Deforum's approach: transform the previous frame BEFORE
 feeding it into img2img diffusion.
 
 Usage:
-    from _src.image_transform import transform_image
+    from src.image_transform import transform_image
     
     # Zoom in slightly
     transformed = transform_image(image, zoom=1.05)

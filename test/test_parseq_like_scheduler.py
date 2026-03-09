@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-sys.path.insert(0, str(ROOT / "_src"))
+sys.path.insert(0, str(ROOT.parent / "src"))
 
 from parseq_like_scheduler import ParseqLikeScheduler, ParameterSpec
 

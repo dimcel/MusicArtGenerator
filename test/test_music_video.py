@@ -15,11 +15,11 @@ import os
 from pathlib import Path
 
 # Add _src to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _src.music_sync import MusicSync
-from _src.image_generator import ImageGenerator, ImageGenerationConfig
-from _src.frame_interpolator import FrameInterpolator
+from src.music_sync import MusicSync
+from src.image_generator import ImageGenerator, ImageGenerationConfig
+from src.frame_interpolator import FrameInterpolator
 
 
 # =============================================================================

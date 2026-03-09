@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 # Add _src to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _src.image_generator import ImageGenerator, ImageGenerationConfig
+from src.image_generator import ImageGenerator, ImageGenerationConfig
 
 
 def test_text_to_image():

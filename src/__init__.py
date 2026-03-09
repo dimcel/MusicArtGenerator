@@ -1,5 +1,5 @@
 """
-Refactored Animation Generator (_src)
+Refactored Animation Generator (src)
 
 Clean, modular implementation following best coding principles.
 
@@ -8,7 +8,7 @@ Modules:
 - (more modules coming as we refactor step by step)
 """
 
-from _src.image_generator import ImageGenerator, ImageGenerationConfig
+from src.image_generator import ImageGenerator, ImageGenerationConfig
 
 __all__ = [
     'ImageGenerator',

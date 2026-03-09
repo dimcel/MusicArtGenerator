@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-sys.path.insert(0, str(ROOT / "_src"))
+sys.path.insert(0, str(ROOT.parent / "src"))
 
 from image_generator import ImageGenerationConfig, ImageGenerator
 from image_transform import transform_image
