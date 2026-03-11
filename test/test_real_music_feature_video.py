@@ -25,6 +25,7 @@ from typing import Dict, Optional
 from PIL import Image
 
 ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT.parent))
 sys.path.insert(0, str(ROOT.parent / "src"))
 
 from audio_feature_extractor import AudioFeatureExtractor
