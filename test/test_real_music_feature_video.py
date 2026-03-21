@@ -477,7 +477,8 @@ def run(
                     pitch=float(pitch_curve[0]),
                 )
             if str(user_prompt).strip():
-                first_prompt = f"{user_prompt}. {first_prompt}"
+                # Respect explicit CLI prompt as a true override.
+                first_prompt = str(user_prompt).strip()
             current = generator.generate_from_text(prompt=first_prompt, seed=42)
         reference_frame = current.copy()
         current.save(output_dir / "frame_00000.png")
@@ -547,7 +548,8 @@ def run(
             )
             transition_active = False
         if (not lock_identity) and str(user_prompt).strip():
-            prompt = f"{user_prompt}. {prompt}"
+            # Respect explicit CLI prompt as a true override.
+            prompt = str(user_prompt).strip()
         prompt = _apply_identity_anchor(prompt, lock_identity=lock_identity, identity_prompt=identity_prompt)
 
         # Adaptive cadence:
