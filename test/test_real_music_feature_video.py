@@ -555,7 +555,9 @@ def run(
                         translation_x=controls["tx_delta"],
                         translation_y=controls["ty_delta"],
                     )
-                    noised = Image.blend(noised, ref_warped, re_anchor_alpha)
+                    # Test mode: hard re-anchor by directly feeding transformed frame0,
+                    # instead of blending it with the current noised frame.
+                    noised = ref_warped
                     used_strength = min(used_strength, re_anchor_strength_cap)
                     used_noise = min(used_noise, re_anchor_noise_cap)
                     used_control_scale = max(used_control_scale, re_anchor_control_min)
