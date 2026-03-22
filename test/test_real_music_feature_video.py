@@ -37,14 +37,11 @@ from image_noise import add_gaussian_noise
 from image_transform import transform_image
 from music_feature_mapper import (
     MusicMappingConfig,
-    build_subject_drive_curve,
     calibrate_feature_curve,
     map_frame_to_controls,
 )
 from prompt_blender import (
     SubjectTransitionController,
-    build_blended_prompt,
-    build_discrete_prompt,
 )
 
 
@@ -252,7 +249,7 @@ def _build_user_prompt(user_prompt: str) -> str:
     p = str(user_prompt or "").strip()
     if p:
         return p
-    return "cinematic music video frame, preserve original subject and background"
+    return "cinematic music video frame"
 
 
 def _re_anchor_profile(level: str):
@@ -285,7 +282,7 @@ def run(
     canny_high: int = 200,
     init_image: Optional[str] = None,
     concept_mode: str = "identity",
-    identity_prompt: str = "preserve subject identity, same person/object, consistent proportions",
+    identity_prompt: str = "",
     user_prompt: str = "",
     color_coherence_mode: str = "none",
     color_coherence_strength: float = 0.60,
@@ -316,13 +313,6 @@ def run(
     onset_curve = calibrate_feature_curve(features.onset, low_q=0.20, high_q=0.995, gamma=1.15)
     bright_curve = calibrate_feature_curve(features.brightness, low_q=0.05, high_q=0.98, gamma=1.0)
     pitch_curve = calibrate_feature_curve(features.pitch, low_q=0.10, high_q=0.95, gamma=1.0)
-    subject_drive_curve = build_subject_drive_curve(
-        energy_curve,
-        bright_curve,
-        pitch_curve,
-        smoothing_window=subject_smoothing_window,
-    )
-
     run_args = _build_run_args(
         audio_path=audio_path,
         fps=fps,
@@ -457,28 +447,7 @@ def run(
             current = _load_and_resize_init_image(init_image, width=width, height=height)
             print("Loaded init image as frame 0.")
         else:
-            if prompt_mode == "blend":
-                subject_state = subject_controller.step(0, float(subject_drive_curve[0]))
-                first_prompt = build_blended_prompt(
-                    prompt_drive=float(subject_drive_curve[0]),
-                    frame=0,
-                    total_frames=total_frames,
-                    beat_pulse=float(features.beat_pulse[0]),
-                    pitch=float(pitch_curve[0]),
-                    subject_blend=subject_state,
-                )
-            else:
-                first_level = int(max(0, min(3, round(float(subject_drive_curve[0]) * 3.0))))
-                first_prompt = build_discrete_prompt(
-                    prompt_level=first_level,
-                    frame=0,
-                    total_frames=total_frames,
-                    beat_pulse=float(features.beat_pulse[0]),
-                    pitch=float(pitch_curve[0]),
-                )
-            if str(user_prompt).strip():
-                # Respect explicit CLI prompt as a true override.
-                first_prompt = str(user_prompt).strip()
+            first_prompt = _build_user_prompt(user_prompt)
             current = generator.generate_from_text(prompt=first_prompt, seed=42)
         reference_frame = current.copy()
         current.save(output_dir / "frame_00000.png")
@@ -523,33 +492,8 @@ def run(
             translation_y=controls["ty_delta"],
         )
 
-        if lock_identity:
-            prompt = _build_user_prompt(user_prompt)
-            transition_active = False
-        elif prompt_mode == "blend":
-            subject_state = subject_controller.step(frame, float(subject_drive_curve[frame]))
-            prompt = build_blended_prompt(
-                prompt_drive=float(subject_drive_curve[frame]),
-                frame=frame,
-                total_frames=total_frames,
-                beat_pulse=float(features.beat_pulse[frame]),
-                pitch=float(pitch_curve[frame]),
-                subject_blend=subject_state,
-            )
-            transition_active = bool(subject_state.in_transition)
-        else:
-            level = int(max(0, min(3, round(float(subject_drive_curve[frame]) * 3.0))))
-            prompt = build_discrete_prompt(
-                prompt_level=level,
-                frame=frame,
-                total_frames=total_frames,
-                beat_pulse=float(features.beat_pulse[frame]),
-                pitch=float(pitch_curve[frame]),
-            )
-            transition_active = False
-        if (not lock_identity) and str(user_prompt).strip():
-            # Respect explicit CLI prompt as a true override.
-            prompt = str(user_prompt).strip()
+        prompt = _build_user_prompt(user_prompt)
+        transition_active = False
         prompt = _apply_identity_anchor(prompt, lock_identity=lock_identity, identity_prompt=identity_prompt)
 
         # Adaptive cadence:
@@ -743,8 +687,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--identity-prompt",
         type=str,
-        default="preserve subject identity, same person/object, consistent proportions",
-        help="Identity anchor text appended in identity concept mode.",
+        default="",
+        help="Optional identity anchor text appended in identity concept mode.",
     )
     parser.add_argument(
         "--re-anchor",
