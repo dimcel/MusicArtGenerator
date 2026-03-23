@@ -258,7 +258,16 @@ def _re_anchor_profile(level: str):
         return 0.12, 0.46, 0.015, 1.00
     if lv == "big":
         return 0.24, 0.36, 0.006, 1.22
-    return 0.18, 0.42, 0.01, 1.10
+    if lv == "mid":
+        return 0.18, 0.42, 0.01, 1.10
+    try:
+        alpha = float(lv)
+    except ValueError:
+        # Fallback to mid if input is neither a known preset nor a float.
+        return 0.18, 0.42, 0.01, 1.10
+    alpha = max(0.0, min(1.0, alpha))
+    # Keep the rest of the profile stable (mid) and expose direct alpha control.
+    return alpha, 0.42, 0.01, 1.10
 
 
 def run(
@@ -555,9 +564,7 @@ def run(
                         translation_x=controls["tx_delta"],
                         translation_y=controls["ty_delta"],
                     )
-                    # Test mode: hard re-anchor by directly feeding transformed frame0,
-                    # instead of blending it with the current noised frame.
-                    noised = ref_warped
+                    noised = Image.blend(noised, ref_warped, re_anchor_alpha)
                     used_strength = min(used_strength, re_anchor_strength_cap)
                     used_noise = min(used_noise, re_anchor_noise_cap)
                     used_control_scale = max(used_control_scale, re_anchor_control_min)
@@ -699,9 +706,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--re-anchor-strength",
-        choices=["small", "mid", "big"],
+        type=str,
         default="mid",
-        help="Re-anchor intensity preset.",
+        help=(
+            "Re-anchor strength preset (small|mid|big) or numeric blend alpha in [0,1] "
+            "(e.g. 0.35)."
+        ),
     )
     parser.add_argument(
         "--re-anchor-every-frames",
