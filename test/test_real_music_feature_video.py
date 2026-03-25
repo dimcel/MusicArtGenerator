@@ -562,8 +562,9 @@ def run(
 
             noised = add_gaussian_noise(transformed, amount=used_noise, seed=used_seed + 17)
 
-            # Periodically re-anchor to the warped frame0 to preserve init-image identity.
-            if lock_identity and re_anchor and reference_frame is not None:
+            # Periodically re-anchor to warped frame0 when init-image is provided.
+            # This works for both concept modes (identity/transform).
+            if bool(init_image) and re_anchor and reference_frame is not None:
                 if frame % re_anchor_every == 0:
                     ref_warped = transform_image(
                         reference_frame,
@@ -710,7 +711,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--re-anchor",
         action="store_true",
-        help="Periodically re-anchor diffusion to the transformed frame 0 in init-image identity mode.",
+        help="Periodically re-anchor diffusion to transformed frame 0 when --init-image is provided.",
     )
     parser.add_argument(
         "--re-anchor-strength",
