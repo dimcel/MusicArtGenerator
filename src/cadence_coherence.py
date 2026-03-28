@@ -2,70 +2,55 @@
 Cadence coherence helper for skipped diffusion frames.
 
 When cadence mode skips img2img on a frame, use this helper to reduce
-visual jitter/drift by blending or optical-flow warping.
+visual jitter/drift by blending or by delegating to FrameInterpolator
+methods (optical_flow/rife/film).
 """
 
-from typing import Literal
-
-import numpy as np
+from typing import Literal, Optional
 from PIL import Image
+
+try:
+    # Package-style import
+    from .frame_interpolator import FrameInterpolator
+except ImportError:
+    # Script-style import when src/ is on sys.path
+    from frame_interpolator import FrameInterpolator
 
 
 class CadenceCoherence:
     def __init__(
         self,
-        method: Literal["none", "blend", "optical_flow"] = "blend",
+        method: Literal["none", "blend", "optical_flow", "rife", "film"] = "blend",
         blend_alpha: float = 0.35,
     ):
-        self.method = method
+        self.method = str(method).strip().lower()
         self.blend_alpha = max(0.0, min(1.0, float(blend_alpha)))
+        self._interpolator: Optional[FrameInterpolator] = None
+
+        valid_methods = {"none", "blend", "optical_flow", "rife", "film"}
+        if self.method not in valid_methods:
+            print(f"⚠️  Unknown cadence coherence method '{self.method}', using 'blend'")
+            self.method = "blend"
+
+        # Keep 'none' and 'blend' lightweight; interpolation engines are used
+        # for optical_flow/rife/film paths.
+        if self.method in {"optical_flow", "rife", "film"}:
+            self._interpolator = FrameInterpolator(method=self.method)
 
     def apply(self, prev_frame: Image.Image, transformed_frame: Image.Image) -> Image.Image:
         if self.method == "none":
             return transformed_frame
         if self.method == "blend":
             return Image.blend(prev_frame, transformed_frame, self.blend_alpha)
-        if self.method == "optical_flow":
-            return self._optical_flow_mix(prev_frame, transformed_frame)
-        return transformed_frame
 
-    def _optical_flow_mix(self, prev_frame: Image.Image, transformed_frame: Image.Image) -> Image.Image:
-        try:
-            import cv2
-        except Exception:
+        if self._interpolator is None:
             return Image.blend(prev_frame, transformed_frame, self.blend_alpha)
 
-        arr_prev = np.array(prev_frame)
-        arr_tr = np.array(transformed_frame)
-
         try:
-            gray_prev = cv2.cvtColor(arr_prev, cv2.COLOR_RGB2GRAY)
-            gray_tr = cv2.cvtColor(arr_tr, cv2.COLOR_RGB2GRAY)
-            flow = cv2.calcOpticalFlowFarneback(
-                gray_prev, gray_tr,
-                None,
-                pyr_scale=0.5,
-                levels=3,
-                winsize=15,
-                iterations=3,
-                poly_n=5,
-                poly_sigma=1.2,
-                flags=0,
-            )
-            h, w = gray_prev.shape
-            xx, yy = np.meshgrid(np.arange(w), np.arange(h))
-            map_x = (xx + flow[..., 0]).astype(np.float32)
-            map_y = (yy + flow[..., 1]).astype(np.float32)
-            warped_prev = cv2.remap(
-                arr_prev,
-                map_x,
-                map_y,
-                cv2.INTER_LINEAR,
-                borderMode=cv2.BORDER_REPLICATE,
-            )
-            a = self.blend_alpha
-            mixed = (warped_prev * (1.0 - a) + arr_tr * a).astype(np.uint8)
-            return Image.fromarray(mixed)
+            # Cadence skip fills exactly one frame each step.
+            frames = self._interpolator.interpolate(prev_frame, transformed_frame, num_frames=1)
+            if frames:
+                return frames[0]
         except Exception:
-            return Image.blend(prev_frame, transformed_frame, self.blend_alpha)
-
+            pass
+        return Image.blend(prev_frame, transformed_frame, self.blend_alpha)
