@@ -667,7 +667,7 @@ if __name__ == "__main__":
         help="Blend strength for color coherence (0..1).",
     )
     parser.add_argument("--prompt-mode", choices=["blend", "hard"], default="blend")
-    parser.add_argument("--coherence", choices=["none", "blend", "optical_flow"], default="blend")
+    parser.add_argument("--coherence", choices=["none", "blend", "optical_flow", "rife", "film"], default="blend")
     parser.add_argument("--subject-hold-frames", type=int, default=32)
     parser.add_argument("--subject-transition-frames", type=int, default=16)
     parser.add_argument("--subject-smoothing-window", type=int, default=41)
