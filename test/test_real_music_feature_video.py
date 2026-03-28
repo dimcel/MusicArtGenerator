@@ -315,6 +315,19 @@ def run(
     features = extractor.extract(total_frames=total_frames)
     beat_set = set(features.beat_frames)
     mapper_cfg = MusicMappingConfig(
+        # Test profile: camera motion driven by zoom only (energy + beat pulse).
+        zoom_base=1.002,
+        zoom_energy_boost=0.008,
+        zoom_beat_boost=0.020,
+        zoom_min=0.995,
+        zoom_max=1.045,
+        # Disable pan/rotation camera movement for isolation tests.
+        pan_base=0.0,
+        pan_onset_boost=0.0,
+        pan_wave_amp=0.0,
+        angle_base=0.0,
+        angle_onset_boost=0.0,
+        angle_wave_amp=0.0,
         control_scale_base=float(control_scale_base),
         control_scale_beat_boost=float(control_scale_beat_boost),
         control_scale_onset_boost=float(control_scale_onset_boost),
