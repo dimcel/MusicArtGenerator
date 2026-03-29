@@ -67,6 +67,8 @@ def _build_run_args(
     control_scale_base: float,
     control_scale_beat_boost: float,
     control_scale_onset_boost: float,
+    zoom_base: float,
+    zoom_beat_boost: float,
     canny_low: int,
     canny_high: int,
     init_image: Optional[str],
@@ -101,6 +103,8 @@ def _build_run_args(
         "control_scale_base": float(control_scale_base),
         "control_scale_beat_boost": float(control_scale_beat_boost),
         "control_scale_onset_boost": float(control_scale_onset_boost),
+        "zoom_base": float(zoom_base),
+        "zoom_beat_boost": float(zoom_beat_boost),
         "canny_low": int(canny_low),
         "canny_high": int(canny_high),
         "init_image": init_image_abs,
@@ -291,6 +295,8 @@ def run(
     control_scale_base: float = 0.80,
     control_scale_beat_boost: float = 0.30,
     control_scale_onset_boost: float = 0.20,
+    zoom_base: float = 1.002,
+    zoom_beat_boost: float = 0.020,
     canny_low: int = 100,
     canny_high: int = 200,
     init_image: Optional[str] = None,
@@ -319,9 +325,9 @@ def run(
     beat_set = set(features.beat_frames)
     mapper_cfg = MusicMappingConfig(
         # Test profile: camera motion driven by zoom only (energy + beat pulse).
-        zoom_base=1.002,
+        zoom_base=float(zoom_base),
         zoom_energy_boost=0.008,
-        zoom_beat_boost=0.020,
+        zoom_beat_boost=float(zoom_beat_boost),
         zoom_min=0.995,
         zoom_max=1.045,
         # Disable pan/rotation camera movement for isolation tests.
@@ -357,6 +363,8 @@ def run(
         control_scale_base=control_scale_base,
         control_scale_beat_boost=control_scale_beat_boost,
         control_scale_onset_boost=control_scale_onset_boost,
+        zoom_base=zoom_base,
+        zoom_beat_boost=zoom_beat_boost,
         canny_low=canny_low,
         canny_high=canny_high,
         init_image=init_image,
@@ -720,6 +728,8 @@ if __name__ == "__main__":
     parser.add_argument("--control-scale-base", type=float, default=0.80)
     parser.add_argument("--control-scale-beat-boost", type=float, default=0.30)
     parser.add_argument("--control-scale-onset-boost", type=float, default=0.20)
+    parser.add_argument("--zoom-base", type=float, default=1.002, help="Base per-frame zoom multiplier for test profile.")
+    parser.add_argument("--zoom-beat-boost", type=float, default=0.020, help="Additional zoom multiplier from beat pulse for test profile.")
     parser.add_argument("--canny-low", type=int, default=100)
     parser.add_argument("--canny-high", type=int, default=200)
     parser.add_argument(
@@ -801,6 +811,8 @@ if __name__ == "__main__":
         control_scale_base=args.control_scale_base,
         control_scale_beat_boost=args.control_scale_beat_boost,
         control_scale_onset_boost=args.control_scale_onset_boost,
+        zoom_base=args.zoom_base,
+        zoom_beat_boost=args.zoom_beat_boost,
         canny_low=args.canny_low,
         canny_high=args.canny_high,
         init_image=args.init_image,
