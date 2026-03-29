@@ -79,6 +79,7 @@ def _build_run_args(
     re_anchor_strength: str,
     re_anchor_every_frames: int,
     disable_camera_motion: bool,
+    disable_music_change: bool,
 ) -> Dict[str, object]:
     init_image_abs = None
     if init_image:
@@ -112,6 +113,7 @@ def _build_run_args(
         "re_anchor_strength": str(re_anchor_strength),
         "re_anchor_every_frames": int(re_anchor_every_frames),
         "disable_camera_motion": bool(disable_camera_motion),
+        "disable_music_change": bool(disable_music_change),
     }
 
 
@@ -301,6 +303,7 @@ def run(
     re_anchor_strength: str = "mid",
     re_anchor_every_frames: int = 12,
     disable_camera_motion: bool = False,
+    disable_music_change: bool = False,
     resume_dir: Optional[str] = None,
     cli_args: Optional[list] = None,
 ):
@@ -366,6 +369,7 @@ def run(
         re_anchor_strength=re_anchor_strength,
         re_anchor_every_frames=re_anchor_every_frames,
         disable_camera_motion=disable_camera_motion,
+        disable_music_change=disable_music_change,
     )
     args_slug = _build_args_slug(run_args)
     lock_identity = bool(init_image) and concept_mode == "identity"
@@ -510,6 +514,21 @@ def run(
             beat_pulse=float(features.beat_pulse[frame]),
             cfg=mapper_cfg,
         )
+
+        if disable_music_change:
+            controls = {
+                "strength": float(mapper_cfg.strength_base),
+                "cfg_scale": float(mapper_cfg.cfg_base),
+                "zoom_delta": float(mapper_cfg.zoom_base),
+                "tx_delta": float(mapper_cfg.pan_base),
+                "ty_delta": float(0.35 * mapper_cfg.pan_base),
+                "angle_delta": float(mapper_cfg.angle_base),
+                "noise_amount": float(mapper_cfg.noise_base),
+                "control_scale": float(mapper_cfg.control_scale_base),
+                "prompt_drive": 0.5,
+                "prompt_level": 2,
+                "seed_jump": 0,
+            }
 
         if disable_camera_motion:
             transformed = current.copy()
@@ -747,6 +766,11 @@ if __name__ == "__main__":
         help="Disable zoom/pan/rotation transform and keep camera static.",
     )
     parser.add_argument(
+        "--disable-music-change",
+        action="store_true",
+        help="Disable music-driven control changes and use fixed controls each frame.",
+    )
+    parser.add_argument(
         "--resume-dir",
         type=str,
         default=None,
@@ -786,6 +810,7 @@ if __name__ == "__main__":
         re_anchor_strength=args.re_anchor_strength,
         re_anchor_every_frames=args.re_anchor_every_frames,
         disable_camera_motion=args.disable_camera_motion,
+        disable_music_change=args.disable_music_change,
         resume_dir=args.resume_dir,
         cli_args=sys.argv[1:],
     )
