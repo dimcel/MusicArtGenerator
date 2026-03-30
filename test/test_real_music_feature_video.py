@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
+import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).parent
@@ -82,6 +83,10 @@ def _build_run_args(
     re_anchor_every_frames: int,
     disable_camera_motion: bool,
     disable_music_change: bool,
+    steady_shift: bool,
+    steady_min_seconds: float,
+    steady_threshold: float,
+    steady_shift_pixels: float,
 ) -> Dict[str, object]:
     init_image_abs = None
     if init_image:
@@ -118,6 +123,10 @@ def _build_run_args(
         "re_anchor_every_frames": int(re_anchor_every_frames),
         "disable_camera_motion": bool(disable_camera_motion),
         "disable_music_change": bool(disable_music_change),
+        "steady_shift": bool(steady_shift),
+        "steady_min_seconds": float(steady_min_seconds),
+        "steady_threshold": float(steady_threshold),
+        "steady_shift_pixels": float(steady_shift_pixels),
     }
 
 
@@ -278,6 +287,64 @@ def _re_anchor_profile(level: str):
     return alpha, 0.42, 0.01, 1.10
 
 
+def _build_stability_curve(
+    onset_curve: np.ndarray,
+    pitch_curve: np.ndarray,
+    bright_curve: np.ndarray,
+) -> np.ndarray:
+    """
+    Estimate melodic steadiness in [0, 1].
+    High values mean:
+    - low onset activity
+    - low frame-to-frame pitch change
+    - low frame-to-frame brightness change
+    """
+    if onset_curve.size == 0:
+        return onset_curve
+
+    pitch_delta = np.abs(np.diff(pitch_curve, prepend=float(pitch_curve[0])))
+    bright_delta = np.abs(np.diff(bright_curve, prepend=float(bright_curve[0])))
+
+    # Heavier onset penalty; pitch/brightness deltas capture "steady note" behavior.
+    stability = 1.0 - (
+        0.62 * onset_curve
+        + 1.20 * pitch_delta
+        + 0.55 * bright_delta
+    )
+    return np.clip(stability, 0.0, 1.0).astype(np.float32)
+
+
+def _build_stable_run_lengths(
+    stability_curve: np.ndarray,
+    threshold: float,
+) -> np.ndarray:
+    """
+    For each frame, count consecutive frames ending at i with stability >= threshold.
+    """
+    out = np.zeros_like(stability_curve, dtype=np.int32)
+    run = 0
+    for i, v in enumerate(stability_curve):
+        if float(v) >= threshold:
+            run += 1
+        else:
+            run = 0
+        out[i] = run
+    return out
+
+
+def _steady_direction_from_features(pitch: float, brightness: float):
+    """
+    Pick a stable camera direction from melodic register/timbre.
+    """
+    if pitch <= 0.35 and brightness <= 0.45:
+        return "left", -1.0, 0.0
+    if pitch >= 0.65 and brightness >= 0.55:
+        return "right", 1.0, 0.0
+    if pitch >= 0.50:
+        return "up", 0.0, -1.0
+    return "down", 0.0, 1.0
+
+
 def run(
     audio_path: str,
     fps: int = 24,
@@ -310,6 +377,10 @@ def run(
     re_anchor_every_frames: int = 12,
     disable_camera_motion: bool = False,
     disable_music_change: bool = False,
+    steady_shift: bool = False,
+    steady_min_seconds: float = 1.0,
+    steady_threshold: float = 0.72,
+    steady_shift_pixels: float = 6.0,
     resume_dir: Optional[str] = None,
     cli_args: Optional[list] = None,
 ):
@@ -347,6 +418,13 @@ def run(
     onset_curve = calibrate_feature_curve(features.onset, low_q=0.20, high_q=0.995, gamma=1.15)
     bright_curve = calibrate_feature_curve(features.brightness, low_q=0.05, high_q=0.98, gamma=1.0)
     pitch_curve = calibrate_feature_curve(features.pitch, low_q=0.10, high_q=0.95, gamma=1.0)
+
+    steady_threshold = max(0.0, min(1.0, float(steady_threshold)))
+    steady_shift_pixels = abs(float(steady_shift_pixels))
+    steady_min_frames = max(1, int(round(max(0.05, float(steady_min_seconds)) * fps)))
+    stability_curve = _build_stability_curve(onset_curve, pitch_curve, bright_curve)
+    stable_run_lengths = _build_stable_run_lengths(stability_curve, threshold=steady_threshold)
+
     run_args = _build_run_args(
         audio_path=audio_path,
         fps=fps,
@@ -378,6 +456,10 @@ def run(
         re_anchor_every_frames=re_anchor_every_frames,
         disable_camera_motion=disable_camera_motion,
         disable_music_change=disable_music_change,
+        steady_shift=steady_shift,
+        steady_min_seconds=steady_min_seconds,
+        steady_threshold=steady_threshold,
+        steady_shift_pixels=steady_shift_pixels,
     )
     args_slug = _build_args_slug(run_args)
     lock_identity = bool(init_image) and concept_mode == "identity"
@@ -411,6 +493,11 @@ def run(
     print(
         f"Re-anchor: {'ON' if re_anchor else 'OFF'} "
         f"(strength={re_anchor_strength}, every={max(1, int(re_anchor_every_frames))}f)"
+    )
+    print(
+        f"Steady shift: {'ON' if steady_shift else 'OFF'} "
+        f"(min={steady_min_seconds:.2f}s/{steady_min_frames}f, "
+        f"thr={steady_threshold:.2f}, px={steady_shift_pixels:.2f})"
     )
     print(f"Camera motion: {'OFF' if disable_camera_motion else 'ON'}")
     if str(user_prompt).strip():
@@ -447,7 +534,22 @@ def run(
         loaded = _load_resume_state(output_dir, args_slug)
         if loaded is not None:
             loaded_run_args = loaded.get("run_args")
-            if loaded_run_args and loaded_run_args != run_args:
+            if loaded_run_args:
+                loaded_run_args_cmp = dict(loaded_run_args)
+                # Backward compatibility with resume states created
+                # before steady-shift options existed.
+                for k in (
+                    "steady_shift",
+                    "steady_min_seconds",
+                    "steady_threshold",
+                    "steady_shift_pixels",
+                ):
+                    if k not in loaded_run_args_cmp and k in run_args:
+                        loaded_run_args_cmp[k] = run_args[k]
+            else:
+                loaded_run_args_cmp = None
+
+            if loaded_run_args_cmp and loaded_run_args_cmp != run_args:
                 raise RuntimeError(
                     "Resume state exists but run arguments differ from current command. "
                     "Use the same arguments, or choose a different resume directory."
@@ -537,6 +639,25 @@ def run(
                 "prompt_level": 2,
                 "seed_jump": 0,
             }
+
+        steady_active = False
+        steady_direction = "none"
+        if steady_shift and not disable_music_change:
+            if int(stable_run_lengths[frame]) >= steady_min_frames:
+                steady_active = True
+                steady_direction, dir_x, dir_y = _steady_direction_from_features(
+                    pitch=float(pitch_curve[frame]),
+                    brightness=float(bright_curve[frame]),
+                )
+                stability_gain = float(stability_curve[frame])
+                shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
+
+                controls["tx_delta"] = float(controls["tx_delta"] + dir_x * shift_px)
+                controls["ty_delta"] = float(controls["ty_delta"] + dir_y * shift_px)
+
+                pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
+                controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
+                controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
 
         if disable_camera_motion:
             transformed = current.copy()
@@ -658,7 +779,8 @@ def run(
                 f"{frame:>4}/{total_frames-1} [{beat_tag}] "
                 f"eng={energy_curve[frame]:.2f} onset={onset_curve[frame]:.2f} pitch={pitch_curve[frame]:.2f} "
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
-                f"zoom={controls['zoom_delta']:.4f} pan={controls['tx_delta']:+.2f} "
+                f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
+                f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
                 f"cscale={used_control_scale:.3f} cn={'ON' if use_controlnet else 'OFF'} "
                 f"ra={int(re_anchor_applied)}"
@@ -730,6 +852,29 @@ if __name__ == "__main__":
     parser.add_argument("--control-scale-onset-boost", type=float, default=0.20)
     parser.add_argument("--zoom-base", type=float, default=1.002, help="Base per-frame zoom multiplier for test profile.")
     parser.add_argument("--zoom-beat-boost", type=float, default=0.020, help="Additional zoom multiplier from beat pulse for test profile.")
+    parser.add_argument(
+        "--steady-shift",
+        action="store_true",
+        help="Enable aggressive pan direction when melody stays stable for a short window.",
+    )
+    parser.add_argument(
+        "--steady-min-seconds",
+        type=float,
+        default=1.0,
+        help="Minimum consecutive stable duration before directional shift activates.",
+    )
+    parser.add_argument(
+        "--steady-threshold",
+        type=float,
+        default=0.72,
+        help="Stability threshold in [0,1] for steady-shift activation.",
+    )
+    parser.add_argument(
+        "--steady-shift-pixels",
+        type=float,
+        default=6.0,
+        help="Base pan magnitude (pixels/frame) while steady-shift is active.",
+    )
     parser.add_argument("--canny-low", type=int, default=100)
     parser.add_argument("--canny-high", type=int, default=200)
     parser.add_argument(
@@ -813,6 +958,10 @@ if __name__ == "__main__":
         control_scale_onset_boost=args.control_scale_onset_boost,
         zoom_base=args.zoom_base,
         zoom_beat_boost=args.zoom_beat_boost,
+        steady_shift=args.steady_shift,
+        steady_min_seconds=args.steady_min_seconds,
+        steady_threshold=args.steady_threshold,
+        steady_shift_pixels=args.steady_shift_pixels,
         canny_low=args.canny_low,
         canny_high=args.canny_high,
         init_image=args.init_image,
