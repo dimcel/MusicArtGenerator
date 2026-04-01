@@ -24,6 +24,26 @@ def _soft_clip(x: float) -> float:
     return math.tanh(1.7 * x)
 
 
+def _beat_pulse_component(
+    phase_seconds: float,
+    kick_amp: float,
+    snare_amp: float,
+) -> float:
+    """
+    Compact beat pulse made of a decaying kick + noise burst.
+    phase_seconds is time since pulse start.
+    """
+    if phase_seconds < 0.0 or phase_seconds > 0.18:
+        return 0.0
+
+    kick_env = math.exp(-phase_seconds * 26.0)
+    kick = math.sin(2.0 * math.pi * (56.0 - 11.0 * phase_seconds) * phase_seconds) * kick_env
+
+    snare_env = math.exp(-phase_seconds * 42.0)
+    snare = (2.0 * random.random() - 1.0) * snare_env
+    return kick_amp * kick + snare_amp * snare
+
+
 def _write_wav_pcm16(output_path: str, pcm: List[int], sample_rate: int) -> str:
     with wave.open(output_path, "wb") as wf:
         wf.setnchannels(1)
@@ -205,6 +225,108 @@ def generate_steady_sections_track(
     return _write_wav_pcm16(output_path=output_path, pcm=pcm, sample_rate=sample_rate)
 
 
+def _debug_section_label(section_index: int):
+    """
+    Deterministic section program for debugging:
+    - shift_heavy: stable sustained notes (should trigger shift)
+    - still: low-energy near-static
+    - beat_heavy: strong transient rhythm (should reduce shift)
+    - mix: both stable bed + rhythmic hits
+    - quiet: low amplitude / near-silent
+    """
+    program = [
+        "shift_heavy",
+        "still",
+        "beat_heavy",
+        "mix",
+        "quiet",
+        "shift_heavy",
+    ]
+    return program[section_index % len(program)]
+
+
+def generate_debug_music_profile_track(
+    output_path: str = "fake_debug_profile.wav",
+    fps: int = 24,
+    total_frames: int = 288,
+    sample_rate: int = 44100,
+    section_seconds: float = 2.0,
+) -> str:
+    """
+    Generate a sectioned debug track with known behavior every N seconds.
+
+    Default timing (2s sections):
+    0-2s  shift_heavy
+    2-4s  still
+    4-6s  beat_heavy
+    6-8s  mix
+    8-10s quiet
+    10-12s shift_heavy
+    """
+    duration = total_frames / float(fps)
+    total_samples = int(duration * sample_rate)
+    section_seconds = max(0.5, float(section_seconds))
+
+    random.seed(321)
+    pcm: List[int] = []
+
+    for n in range(total_samples):
+        t = n / float(sample_rate)
+        sec_idx = int(t / section_seconds)
+        sec_label = _debug_section_label(sec_idx)
+        sec_local_t = t - sec_idx * section_seconds
+
+        x = 0.0
+        if sec_label == "shift_heavy":
+            # Stable sustained bed: low onsets, slow variation.
+            f = 180.0 + 1.5 * math.sin(2.0 * math.pi * 0.20 * sec_local_t)
+            tone = 0.25 * math.sin(2.0 * math.pi * f * t)
+            harmonic = 0.08 * math.sin(2.0 * math.pi * (2.0 * f) * t)
+            sub = 0.06 * math.sin(2.0 * math.pi * 0.5 * f * t)
+            hiss = 0.006 * (2.0 * random.random() - 1.0)
+            x = tone + harmonic + sub + hiss
+
+        elif sec_label == "still":
+            # Almost static, low-energy region.
+            f = 120.0
+            tone = 0.035 * math.sin(2.0 * math.pi * f * t)
+            hiss = 0.0025 * (2.0 * random.random() - 1.0)
+            x = tone + hiss
+
+        elif sec_label == "beat_heavy":
+            # Strong transients + moving pitch.
+            moving_f = 130.0 + 90.0 * math.sin(2.0 * math.pi * 2.6 * sec_local_t)
+            bed = 0.07 * math.sin(2.0 * math.pi * moving_f * t)
+            beat_phase = sec_local_t % 0.5
+            beat = _beat_pulse_component(beat_phase, kick_amp=0.52, snare_amp=0.24)
+            hiss = 0.013 * (2.0 * random.random() - 1.0)
+            x = bed + beat + hiss
+
+        elif sec_label == "mix":
+            # Stable pad + beat pulses together.
+            f = 220.0 + 2.0 * math.sin(2.0 * math.pi * 0.35 * sec_local_t)
+            pad = 0.16 * math.sin(2.0 * math.pi * f * t)
+            harmonic = 0.05 * math.sin(2.0 * math.pi * (2.0 * f) * t)
+            beat_phase = sec_local_t % 0.5
+            beat = _beat_pulse_component(beat_phase, kick_amp=0.26, snare_amp=0.11)
+            hiss = 0.008 * (2.0 * random.random() - 1.0)
+            x = pad + harmonic + beat + hiss
+
+        else:  # quiet
+            # Quiet part with slight fade and minimal texture.
+            env = 0.020 + 0.030 * (1.0 - min(1.0, sec_local_t / section_seconds))
+            f = 160.0
+            tone = env * math.sin(2.0 * math.pi * f * t)
+            hiss = 0.003 * (2.0 * random.random() - 1.0)
+            x = tone + hiss
+
+        x = _soft_clip(x)
+        x = max(-1.0, min(1.0, x))
+        pcm.append(int(x * 32767.0))
+
+    return _write_wav_pcm16(output_path=output_path, pcm=pcm, sample_rate=sample_rate)
+
+
 def _regular_beats(total_frames: int, fps: int, bpm: float):
     frames_per_beat = max(1.0, (60.0 / max(1e-6, bpm)) * fps)
     beats = list(range(0, total_frames, int(frames_per_beat)))
@@ -214,7 +336,7 @@ def _regular_beats(total_frames: int, fps: int, bpm: float):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["music", "steady"], default="steady")
+    parser.add_argument("--mode", choices=["music", "steady", "debug"], default="steady")
     parser.add_argument("--output", type=str, default="")
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--frames", type=int, default=192)
@@ -233,6 +355,12 @@ if __name__ == "__main__":
         default=0.5,
         help="Metronome pulse interval in steady mode. 0 disables pulses.",
     )
+    parser.add_argument(
+        "--debug-section-seconds",
+        type=float,
+        default=2.0,
+        help="Section length for debug mode timeline.",
+    )
     args = parser.parse_args()
 
     if args.mode == "music":
@@ -247,13 +375,29 @@ if __name__ == "__main__":
             profile=args.profile,
         )
     else:
-        out = generate_steady_sections_track(
-            output_path=args.output or "fake_steady_sections.wav",
-            fps=args.fps,
-            total_frames=args.frames,
-            sample_rate=args.sample_rate,
-            section_seconds=args.section_seconds,
-            pulse_every_seconds=args.pulse_every_seconds,
-        )
+        if args.mode == "steady":
+            out = generate_steady_sections_track(
+                output_path=args.output or "fake_steady_sections.wav",
+                fps=args.fps,
+                total_frames=args.frames,
+                sample_rate=args.sample_rate,
+                section_seconds=args.section_seconds,
+                pulse_every_seconds=args.pulse_every_seconds,
+            )
+        else:
+            out = generate_debug_music_profile_track(
+                output_path=args.output or "fake_debug_profile.wav",
+                fps=args.fps,
+                total_frames=args.frames,
+                sample_rate=args.sample_rate,
+                section_seconds=args.debug_section_seconds,
+            )
+            duration = args.frames / float(args.fps)
+            num_sections = int(math.ceil(duration / float(max(0.5, args.debug_section_seconds))))
+            print("Debug timeline:")
+            for i in range(num_sections):
+                start = i * float(args.debug_section_seconds)
+                end = min(duration, (i + 1) * float(args.debug_section_seconds))
+                print(f"  {start:>4.1f}s - {end:>4.1f}s : {_debug_section_label(i)}")
 
     print(f"Created {out}")

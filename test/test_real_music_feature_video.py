@@ -417,15 +417,10 @@ def _build_auto_steady_activation_mask(
 
 def _steady_direction_from_features(pitch: float, brightness: float):
     """
-    Pick a stable camera direction from melodic register/timbre.
+    Temporary debug behavior: force right-only shift.
     """
-    if pitch <= 0.35 and brightness <= 0.45:
-        return "left", -1.0, 0.0
-    if pitch >= 0.65 and brightness >= 0.55:
-        return "right", 1.0, 0.0
-    if pitch >= 0.50:
-        return "up", 0.0, -1.0
-    return "down", 0.0, 1.0
+    _ = pitch, brightness
+    return "right", 1.0, 0.0
 
 
 def run(
