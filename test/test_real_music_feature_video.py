@@ -86,6 +86,7 @@ def _build_run_args(
     steady_shift: bool,
     steady_activation_mode: str,
     steady_activation_ratio: float,
+    steady_shift_probability: float,
     steady_min_seconds: float,
     steady_threshold: float,
     steady_shift_pixels: float,
@@ -128,6 +129,7 @@ def _build_run_args(
         "steady_shift": bool(steady_shift),
         "steady_activation_mode": str(steady_activation_mode),
         "steady_activation_ratio": float(steady_activation_ratio),
+        "steady_shift_probability": float(steady_shift_probability),
         "steady_min_seconds": float(steady_min_seconds),
         "steady_threshold": float(steady_threshold),
         "steady_shift_pixels": float(steady_shift_pixels),
@@ -356,34 +358,64 @@ def _remove_short_true_runs(mask: np.ndarray, min_len: int) -> np.ndarray:
     return m
 
 
+def _extract_true_runs(mask: np.ndarray):
+    """
+    Return list of (start_inclusive, end_exclusive) for True runs.
+    """
+    m = np.asarray(mask, dtype=bool)
+    runs = []
+    start = -1
+    for i in range(m.size + 1):
+        is_on = bool(m[i]) if i < m.size else False
+        if is_on and start < 0:
+            start = i
+        if (not is_on) and start >= 0:
+            runs.append((start, i))
+            start = -1
+    return runs
+
+
 def _build_auto_steady_activation_mask(
     stability_curve: np.ndarray,
+    energy_curve: np.ndarray,
     onset_curve: np.ndarray,
     beat_frames: list,
     fps: int,
-    target_ratio: float = 0.50,
+    activation_ratio: float = 1.0,
+    shift_probability: float = 1.0,
 ):
     """
     Build an activation mask directly from music features.
-    target_ratio controls approximate active-time share (e.g. 0.5 ~= half the frames).
+    activation_ratio applies to eligible stable runs (not all frames).
+    shift_probability is per-run keep probability after ratio selection.
     """
-    score = np.clip(
-        np.asarray(stability_curve, dtype=np.float32) - 0.30 * np.asarray(onset_curve, dtype=np.float32),
-        0.0,
-        1.0,
-    )
-    if score.size == 0:
+    stability = np.asarray(stability_curve, dtype=np.float32)
+    energy = np.asarray(energy_curve, dtype=np.float32)
+    onset = np.asarray(onset_curve, dtype=np.float32)
+
+    if stability.size == 0:
         return np.zeros(0, dtype=bool), {
-            "threshold": 0.0,
-            "target_ratio": float(target_ratio),
-            "actual_ratio": 0.0,
+            "stable_threshold": 0.0,
+            "activation_ratio": float(activation_ratio),
+            "shift_probability": float(shift_probability),
+            "eligible_frame_ratio": 0.0,
+            "actual_frame_ratio": 0.0,
             "min_run_frames": 0,
             "beat_span_frames": 0,
+            "energy_gate": 0.0,
+            "eligible_runs": 0,
+            "selected_runs": 0,
+            "active_runs": 0,
         }
 
-    target_ratio = max(0.05, min(0.95, float(target_ratio)))
-    quantile = max(0.0, min(1.0, 1.0 - target_ratio))
-    threshold = float(np.quantile(score, quantile))
+    # Require "present" signal energy so near-silent or very low-energy
+    # stable regions don't trigger directional motion.
+    energy_gate = float(max(0.08, np.quantile(energy, 0.35)))
+    energy_ok = energy >= energy_gate
+
+    stability_no_onset = np.clip(stability - 0.30 * onset, 0.0, 1.0)
+    score = np.clip(stability_no_onset * np.asarray(energy_ok, dtype=np.float32), 0.0, 1.0)
+    stable_threshold = float(max(0.55, np.quantile(stability_no_onset, 0.60)))
 
     if len(beat_frames) >= 2:
         beat_arr = np.asarray(sorted(beat_frames), dtype=np.int32)
@@ -393,25 +425,51 @@ def _build_auto_steady_activation_mask(
         beat_span = max(2, int(0.5 * fps))
 
     min_run_frames = max(3, int(round(0.45 * beat_span)))
-    raw = score >= threshold
-    mask = _remove_short_true_runs(raw, min_len=min_run_frames)
+    eligible_raw = np.logical_and(stability_no_onset >= stable_threshold, energy_ok)
+    eligible_mask = _remove_short_true_runs(eligible_raw, min_len=min_run_frames)
+    eligible_runs = _extract_true_runs(eligible_mask)
+    eligible_frame_ratio = float(np.asarray(eligible_mask, dtype=np.float32).mean())
 
-    actual_ratio = float(mask.mean()) if mask.size else 0.0
-    if actual_ratio < 0.08:
-        relaxed_target = min(0.95, target_ratio + 0.20)
-        relaxed_threshold = float(np.quantile(score, max(0.0, min(1.0, 1.0 - relaxed_target))))
-        relaxed_min_run = max(2, int(round(0.30 * beat_span)))
-        mask = _remove_short_true_runs(score >= relaxed_threshold, min_len=relaxed_min_run)
-        threshold = relaxed_threshold
-        min_run_frames = relaxed_min_run
-        actual_ratio = float(mask.mean()) if mask.size else 0.0
+    activation_ratio = max(0.0, min(1.0, float(activation_ratio)))
+    shift_probability = max(0.0, min(1.0, float(shift_probability)))
 
-    return mask.astype(bool), {
-        "threshold": threshold,
-        "target_ratio": target_ratio,
-        "actual_ratio": actual_ratio,
+    selected_runs = []
+    if eligible_runs and activation_ratio > 0.0:
+        run_scores = []
+        for idx, (a, b) in enumerate(eligible_runs):
+            run_score = float(np.mean(score[a:b])) if b > a else 0.0
+            run_scores.append((run_score, idx))
+
+        run_scores.sort(reverse=True, key=lambda x: x[0])
+        keep_count = int(round(activation_ratio * len(eligible_runs)))
+        keep_count = min(len(eligible_runs), max(0, keep_count))
+        if keep_count == 0 and activation_ratio > 0.0:
+            keep_count = 1
+        selected_indices = sorted(idx for _, idx in run_scores[:keep_count])
+        selected_runs = [eligible_runs[i] for i in selected_indices]
+
+    active_mask = np.zeros_like(eligible_mask, dtype=bool)
+    if selected_runs and shift_probability > 0.0:
+        rng = np.random.default_rng(42)
+        for a, b in selected_runs:
+            if float(rng.random()) <= shift_probability:
+                active_mask[a:b] = True
+
+    active_runs = _extract_true_runs(active_mask)
+    actual_frame_ratio = float(np.asarray(active_mask, dtype=np.float32).mean())
+
+    return active_mask.astype(bool), {
+        "stable_threshold": stable_threshold,
+        "activation_ratio": activation_ratio,
+        "shift_probability": shift_probability,
+        "eligible_frame_ratio": eligible_frame_ratio,
+        "actual_frame_ratio": actual_frame_ratio,
         "min_run_frames": min_run_frames,
         "beat_span_frames": beat_span,
+        "energy_gate": energy_gate,
+        "eligible_runs": len(eligible_runs),
+        "selected_runs": len(selected_runs),
+        "active_runs": len(active_runs),
     }
 
 
@@ -457,7 +515,8 @@ def run(
     disable_music_change: bool = False,
     steady_shift: bool = False,
     steady_activation_mode: str = "auto",
-    steady_activation_ratio: float = 0.50,
+    steady_activation_ratio: float = 1.0,
+    steady_shift_probability: float = 1.0,
     steady_min_seconds: float = 1.0,
     steady_threshold: float = 0.72,
     steady_shift_pixels: float = 6.0,
@@ -503,7 +562,8 @@ def run(
     if steady_activation_mode not in ("auto", "manual"):
         raise ValueError("steady_activation_mode must be 'auto' or 'manual'")
 
-    steady_activation_ratio = max(0.05, min(0.95, float(steady_activation_ratio)))
+    steady_activation_ratio = max(0.0, min(1.0, float(steady_activation_ratio)))
+    steady_shift_probability = max(0.0, min(1.0, float(steady_shift_probability)))
     steady_threshold = max(0.0, min(1.0, float(steady_threshold)))
     steady_shift_pixels = abs(float(steady_shift_pixels))
     steady_min_frames = max(1, int(round(max(0.05, float(steady_min_seconds)) * fps)))
@@ -517,10 +577,12 @@ def run(
     else:
         steady_active_mask, steady_auto_meta = _build_auto_steady_activation_mask(
             stability_curve=stability_curve,
+            energy_curve=energy_curve,
             onset_curve=onset_curve,
             beat_frames=features.beat_frames,
             fps=fps,
-            target_ratio=steady_activation_ratio,
+            activation_ratio=steady_activation_ratio,
+            shift_probability=steady_shift_probability,
         )
 
     run_args = _build_run_args(
@@ -557,6 +619,7 @@ def run(
         steady_shift=steady_shift,
         steady_activation_mode=steady_activation_mode,
         steady_activation_ratio=steady_activation_ratio,
+        steady_shift_probability=steady_shift_probability,
         steady_min_seconds=steady_min_seconds,
         steady_threshold=steady_threshold,
         steady_shift_pixels=steady_shift_pixels,
@@ -598,9 +661,14 @@ def run(
         if steady_activation_mode == "auto" and steady_auto_meta is not None:
             print(
                 "Steady shift: ON "
-                f"(mode=auto, ratio={steady_auto_meta['target_ratio']:.2f}, "
-                f"actual={steady_auto_meta['actual_ratio']:.2f}, "
-                f"thr={steady_auto_meta['threshold']:.2f}, "
+                f"(mode=auto, run_ratio={steady_auto_meta['activation_ratio']:.2f}, "
+                f"run_prob={steady_auto_meta['shift_probability']:.2f}, "
+                f"eligible_runs={steady_auto_meta['eligible_runs']}, "
+                f"active_runs={steady_auto_meta['active_runs']}, "
+                f"eligible_f={steady_auto_meta['eligible_frame_ratio']:.2f}, "
+                f"active_f={steady_auto_meta['actual_frame_ratio']:.2f}, "
+                f"sth={steady_auto_meta['stable_threshold']:.2f}, "
+                f"eg={steady_auto_meta['energy_gate']:.2f}, "
                 f"min_run={steady_auto_meta['min_run_frames']}f, "
                 f"px={steady_shift_pixels:.2f})"
             )
@@ -655,6 +723,7 @@ def run(
                     "steady_shift",
                     "steady_activation_mode",
                     "steady_activation_ratio",
+                    "steady_shift_probability",
                     "steady_min_seconds",
                     "steady_threshold",
                     "steady_shift_pixels",
@@ -1005,8 +1074,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--steady-activation-ratio",
         type=float,
-        default=0.50,
-        help="Target active-time share in auto mode (0..1). 0.5 means roughly half the time.",
+        default=1.0,
+        help="Auto mode: fraction of eligible music-driven shift runs to keep (0..1).",
+    )
+    parser.add_argument(
+        "--steady-shift-probability",
+        type=float,
+        default=1.0,
+        help="Auto mode: per-selected-run probability that shift is applied (0..1).",
     )
     parser.add_argument(
         "--steady-min-seconds",
@@ -1112,6 +1187,7 @@ if __name__ == "__main__":
         steady_shift=args.steady_shift,
         steady_activation_mode=args.steady_activation_mode,
         steady_activation_ratio=args.steady_activation_ratio,
+        steady_shift_probability=args.steady_shift_probability,
         steady_min_seconds=args.steady_min_seconds,
         steady_threshold=args.steady_threshold,
         steady_shift_pixels=args.steady_shift_pixels,
