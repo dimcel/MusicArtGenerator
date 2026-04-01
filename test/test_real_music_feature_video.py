@@ -84,6 +84,8 @@ def _build_run_args(
     disable_camera_motion: bool,
     disable_music_change: bool,
     steady_shift: bool,
+    steady_activation_mode: str,
+    steady_activation_ratio: float,
     steady_min_seconds: float,
     steady_threshold: float,
     steady_shift_pixels: float,
@@ -124,6 +126,8 @@ def _build_run_args(
         "disable_camera_motion": bool(disable_camera_motion),
         "disable_music_change": bool(disable_music_change),
         "steady_shift": bool(steady_shift),
+        "steady_activation_mode": str(steady_activation_mode),
+        "steady_activation_ratio": float(steady_activation_ratio),
         "steady_min_seconds": float(steady_min_seconds),
         "steady_threshold": float(steady_threshold),
         "steady_shift_pixels": float(steady_shift_pixels),
@@ -332,6 +336,85 @@ def _build_stable_run_lengths(
     return out
 
 
+def _remove_short_true_runs(mask: np.ndarray, min_len: int) -> np.ndarray:
+    """
+    Remove active runs shorter than min_len from a boolean mask.
+    """
+    m = np.asarray(mask, dtype=bool).copy()
+    if m.size == 0 or min_len <= 1:
+        return m
+
+    start = -1
+    for i in range(m.size + 1):
+        is_on = bool(m[i]) if i < m.size else False
+        if is_on and start < 0:
+            start = i
+        if (not is_on) and start >= 0:
+            if i - start < min_len:
+                m[start:i] = False
+            start = -1
+    return m
+
+
+def _build_auto_steady_activation_mask(
+    stability_curve: np.ndarray,
+    onset_curve: np.ndarray,
+    beat_frames: list,
+    fps: int,
+    target_ratio: float = 0.50,
+):
+    """
+    Build an activation mask directly from music features.
+    target_ratio controls approximate active-time share (e.g. 0.5 ~= half the frames).
+    """
+    score = np.clip(
+        np.asarray(stability_curve, dtype=np.float32) - 0.30 * np.asarray(onset_curve, dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    if score.size == 0:
+        return np.zeros(0, dtype=bool), {
+            "threshold": 0.0,
+            "target_ratio": float(target_ratio),
+            "actual_ratio": 0.0,
+            "min_run_frames": 0,
+            "beat_span_frames": 0,
+        }
+
+    target_ratio = max(0.05, min(0.95, float(target_ratio)))
+    quantile = max(0.0, min(1.0, 1.0 - target_ratio))
+    threshold = float(np.quantile(score, quantile))
+
+    if len(beat_frames) >= 2:
+        beat_arr = np.asarray(sorted(beat_frames), dtype=np.int32)
+        beat_gaps = np.diff(beat_arr)
+        beat_span = int(np.median(beat_gaps)) if beat_gaps.size else max(2, int(0.5 * fps))
+    else:
+        beat_span = max(2, int(0.5 * fps))
+
+    min_run_frames = max(3, int(round(0.45 * beat_span)))
+    raw = score >= threshold
+    mask = _remove_short_true_runs(raw, min_len=min_run_frames)
+
+    actual_ratio = float(mask.mean()) if mask.size else 0.0
+    if actual_ratio < 0.08:
+        relaxed_target = min(0.95, target_ratio + 0.20)
+        relaxed_threshold = float(np.quantile(score, max(0.0, min(1.0, 1.0 - relaxed_target))))
+        relaxed_min_run = max(2, int(round(0.30 * beat_span)))
+        mask = _remove_short_true_runs(score >= relaxed_threshold, min_len=relaxed_min_run)
+        threshold = relaxed_threshold
+        min_run_frames = relaxed_min_run
+        actual_ratio = float(mask.mean()) if mask.size else 0.0
+
+    return mask.astype(bool), {
+        "threshold": threshold,
+        "target_ratio": target_ratio,
+        "actual_ratio": actual_ratio,
+        "min_run_frames": min_run_frames,
+        "beat_span_frames": beat_span,
+    }
+
+
 def _steady_direction_from_features(pitch: float, brightness: float):
     """
     Pick a stable camera direction from melodic register/timbre.
@@ -378,6 +461,8 @@ def run(
     disable_camera_motion: bool = False,
     disable_music_change: bool = False,
     steady_shift: bool = False,
+    steady_activation_mode: str = "auto",
+    steady_activation_ratio: float = 0.50,
     steady_min_seconds: float = 1.0,
     steady_threshold: float = 0.72,
     steady_shift_pixels: float = 6.0,
@@ -419,11 +504,29 @@ def run(
     bright_curve = calibrate_feature_curve(features.brightness, low_q=0.05, high_q=0.98, gamma=1.0)
     pitch_curve = calibrate_feature_curve(features.pitch, low_q=0.10, high_q=0.95, gamma=1.0)
 
+    steady_activation_mode = str(steady_activation_mode or "auto").strip().lower()
+    if steady_activation_mode not in ("auto", "manual"):
+        raise ValueError("steady_activation_mode must be 'auto' or 'manual'")
+
+    steady_activation_ratio = max(0.05, min(0.95, float(steady_activation_ratio)))
     steady_threshold = max(0.0, min(1.0, float(steady_threshold)))
     steady_shift_pixels = abs(float(steady_shift_pixels))
     steady_min_frames = max(1, int(round(max(0.05, float(steady_min_seconds)) * fps)))
     stability_curve = _build_stability_curve(onset_curve, pitch_curve, bright_curve)
-    stable_run_lengths = _build_stable_run_lengths(stability_curve, threshold=steady_threshold)
+
+    stable_run_lengths = None
+    steady_active_mask = None
+    steady_auto_meta = None
+    if steady_activation_mode == "manual":
+        stable_run_lengths = _build_stable_run_lengths(stability_curve, threshold=steady_threshold)
+    else:
+        steady_active_mask, steady_auto_meta = _build_auto_steady_activation_mask(
+            stability_curve=stability_curve,
+            onset_curve=onset_curve,
+            beat_frames=features.beat_frames,
+            fps=fps,
+            target_ratio=steady_activation_ratio,
+        )
 
     run_args = _build_run_args(
         audio_path=audio_path,
@@ -457,6 +560,8 @@ def run(
         disable_camera_motion=disable_camera_motion,
         disable_music_change=disable_music_change,
         steady_shift=steady_shift,
+        steady_activation_mode=steady_activation_mode,
+        steady_activation_ratio=steady_activation_ratio,
         steady_min_seconds=steady_min_seconds,
         steady_threshold=steady_threshold,
         steady_shift_pixels=steady_shift_pixels,
@@ -494,11 +599,24 @@ def run(
         f"Re-anchor: {'ON' if re_anchor else 'OFF'} "
         f"(strength={re_anchor_strength}, every={max(1, int(re_anchor_every_frames))}f)"
     )
-    print(
-        f"Steady shift: {'ON' if steady_shift else 'OFF'} "
-        f"(min={steady_min_seconds:.2f}s/{steady_min_frames}f, "
-        f"thr={steady_threshold:.2f}, px={steady_shift_pixels:.2f})"
-    )
+    if steady_shift:
+        if steady_activation_mode == "auto" and steady_auto_meta is not None:
+            print(
+                "Steady shift: ON "
+                f"(mode=auto, ratio={steady_auto_meta['target_ratio']:.2f}, "
+                f"actual={steady_auto_meta['actual_ratio']:.2f}, "
+                f"thr={steady_auto_meta['threshold']:.2f}, "
+                f"min_run={steady_auto_meta['min_run_frames']}f, "
+                f"px={steady_shift_pixels:.2f})"
+            )
+        else:
+            print(
+                "Steady shift: ON "
+                f"(mode=manual, min={steady_min_seconds:.2f}s/{steady_min_frames}f, "
+                f"thr={steady_threshold:.2f}, px={steady_shift_pixels:.2f})"
+            )
+    else:
+        print("Steady shift: OFF")
     print(f"Camera motion: {'OFF' if disable_camera_motion else 'ON'}")
     if str(user_prompt).strip():
         print(f"User prompt: {user_prompt}")
@@ -540,6 +658,8 @@ def run(
                 # before steady-shift options existed.
                 for k in (
                     "steady_shift",
+                    "steady_activation_mode",
+                    "steady_activation_ratio",
                     "steady_min_seconds",
                     "steady_threshold",
                     "steady_shift_pixels",
@@ -608,6 +728,11 @@ def run(
     if start_frame >= total_frames:
         print("All frames already generated; skipping frame generation.")
 
+    steady_prev_active = False
+    steady_dir_label = "none"
+    steady_dir_x = 0.0
+    steady_dir_y = 0.0
+
     for frame in range(start_frame, total_frames):
         if reference_frame is None:
             frame0_path = output_dir / "frame_00000.png"
@@ -643,21 +768,40 @@ def run(
         steady_active = False
         steady_direction = "none"
         if steady_shift and not disable_music_change:
-            if int(stable_run_lengths[frame]) >= steady_min_frames:
-                steady_active = True
-                steady_direction, dir_x, dir_y = _steady_direction_from_features(
-                    pitch=float(pitch_curve[frame]),
-                    brightness=float(bright_curve[frame]),
+            if steady_activation_mode == "auto":
+                steady_active = bool(steady_active_mask[frame]) if steady_active_mask is not None else False
+            else:
+                steady_active = (
+                    bool(stable_run_lengths is not None)
+                    and int(stable_run_lengths[frame]) >= steady_min_frames
                 )
+
+            if steady_active:
+                if not steady_prev_active:
+                    steady_dir_label, steady_dir_x, steady_dir_y = _steady_direction_from_features(
+                        pitch=float(pitch_curve[frame]),
+                        brightness=float(bright_curve[frame]),
+                    )
+                steady_direction = steady_dir_label
                 stability_gain = float(stability_curve[frame])
                 shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
 
-                controls["tx_delta"] = float(controls["tx_delta"] + dir_x * shift_px)
-                controls["ty_delta"] = float(controls["ty_delta"] + dir_y * shift_px)
+                controls["tx_delta"] = float(controls["tx_delta"] + steady_dir_x * shift_px)
+                controls["ty_delta"] = float(controls["ty_delta"] + steady_dir_y * shift_px)
 
                 pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
                 controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
                 controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
+            else:
+                steady_dir_label = "none"
+                steady_dir_x = 0.0
+                steady_dir_y = 0.0
+        else:
+            steady_dir_label = "none"
+            steady_dir_x = 0.0
+            steady_dir_y = 0.0
+
+        steady_prev_active = bool(steady_active)
 
         if disable_camera_motion:
             transformed = current.copy()
@@ -855,19 +999,31 @@ if __name__ == "__main__":
     parser.add_argument(
         "--steady-shift",
         action="store_true",
-        help="Enable aggressive pan direction when melody stays stable for a short window.",
+        help="Enable aggressive pan direction during musically stable sections.",
+    )
+    parser.add_argument(
+        "--steady-activation-mode",
+        choices=["auto", "manual"],
+        default="auto",
+        help="auto=derive activation duration from music features, manual=use threshold+min-seconds.",
+    )
+    parser.add_argument(
+        "--steady-activation-ratio",
+        type=float,
+        default=0.50,
+        help="Target active-time share in auto mode (0..1). 0.5 means roughly half the time.",
     )
     parser.add_argument(
         "--steady-min-seconds",
         type=float,
         default=1.0,
-        help="Minimum consecutive stable duration before directional shift activates.",
+        help="Manual mode only: minimum consecutive stable duration before shift activates.",
     )
     parser.add_argument(
         "--steady-threshold",
         type=float,
         default=0.72,
-        help="Stability threshold in [0,1] for steady-shift activation.",
+        help="Manual mode only: stability threshold in [0,1] for steady-shift activation.",
     )
     parser.add_argument(
         "--steady-shift-pixels",
@@ -959,6 +1115,8 @@ if __name__ == "__main__":
         zoom_base=args.zoom_base,
         zoom_beat_boost=args.zoom_beat_boost,
         steady_shift=args.steady_shift,
+        steady_activation_mode=args.steady_activation_mode,
+        steady_activation_ratio=args.steady_activation_ratio,
         steady_min_seconds=args.steady_min_seconds,
         steady_threshold=args.steady_threshold,
         steady_shift_pixels=args.steady_shift_pixels,
