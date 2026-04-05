@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT.parent))
@@ -77,6 +77,7 @@ def _build_run_args(
     identity_prompt: str,
     user_prompt: str,
     prompt_change_every_beats: int,
+    music_color_fx: bool,
     color_coherence_mode: str,
     color_coherence_strength: float,
     re_anchor: bool,
@@ -121,6 +122,7 @@ def _build_run_args(
         "identity_prompt": str(identity_prompt),
         "user_prompt": str(user_prompt),
         "prompt_change_every_beats": int(prompt_change_every_beats),
+        "music_color_fx": bool(music_color_fx),
         "color_coherence_mode": str(color_coherence_mode),
         "color_coherence_strength": float(color_coherence_strength),
         "re_anchor": bool(re_anchor),
@@ -299,6 +301,33 @@ def _parse_prompt_candidates(user_prompt: str):
             return items
 
     return [raw]
+
+
+def _apply_music_color_fx(
+    image: Image.Image,
+    beat_pulse: float,
+    energy: float,
+    brightness: float,
+) -> Image.Image:
+    """
+    Simple music color FX:
+    - beat/energy -> saturation + contrast pop
+    - brightness -> warm/cool tint direction
+    """
+    sat = 1.0 + 0.18 * float(beat_pulse) + 0.08 * (float(energy) - 0.5)
+    sat = max(0.88, min(1.32, sat))
+    contrast = 1.0 + 0.12 * float(beat_pulse) + 0.05 * (float(energy) - 0.5)
+    contrast = max(0.90, min(1.25, contrast))
+
+    out = ImageEnhance.Color(image).enhance(sat)
+    out = ImageEnhance.Contrast(out).enhance(contrast)
+
+    tint_color = (220, 235, 255) if float(brightness) >= 0.55 else (255, 235, 220)
+    tint_alpha = 0.04 + 0.10 * float(beat_pulse)
+    tint_alpha = max(0.02, min(0.14, tint_alpha))
+    overlay = Image.new("RGB", out.size, tint_color)
+    out = Image.blend(out, overlay, tint_alpha)
+    return out
 
 
 def _re_anchor_profile(level: str):
@@ -533,6 +562,7 @@ def run(
     identity_prompt: str = "",
     user_prompt: str = "",
     prompt_change_every_beats: int = 1,
+    music_color_fx: bool = False,
     color_coherence_mode: str = "none",
     color_coherence_strength: float = 0.60,
     re_anchor: bool = False,
@@ -640,6 +670,7 @@ def run(
         identity_prompt=identity_prompt,
         user_prompt=user_prompt,
         prompt_change_every_beats=prompt_change_every_beats,
+        music_color_fx=music_color_fx,
         color_coherence_mode=color_coherence_mode,
         color_coherence_strength=color_coherence_strength,
         re_anchor=re_anchor,
@@ -683,6 +714,7 @@ def run(
         print(f"Init image: {init_image} (concept_mode={concept_mode})")
     else:
         print("Init image: OFF")
+    print(f"Music color FX: {'ON' if music_color_fx else 'OFF'}")
     print(f"Color coherence: {color_coherence_mode} (strength={color_coherence_strength:.2f})")
     print(
         f"Re-anchor: {'ON' if re_anchor else 'OFF'} "
@@ -764,6 +796,7 @@ def run(
                     "steady_activation_mode",
                     "steady_activation_ratio",
                     "steady_shift_probability",
+                    "music_color_fx",
                     "steady_min_seconds",
                     "steady_threshold",
                     "steady_shift_pixels",
@@ -1046,6 +1079,14 @@ def run(
                 strength=color_coherence_strength,
             )
 
+        if music_color_fx and not disable_music_change:
+            current = _apply_music_color_fx(
+                current,
+                beat_pulse=float(features.beat_pulse[frame]),
+                energy=float(energy_curve[frame]),
+                brightness=float(bright_curve[frame]),
+            )
+
         current.save(output_dir / f"frame_{frame:05d}.png")
         _save_resume_state(
             state_file=resume_state_file,
@@ -1116,6 +1157,11 @@ if __name__ == "__main__":
         type=int,
         default=1,
         help="When using prompt lists, switch to next prompt every N detected beats.",
+    )
+    parser.add_argument(
+        "--music-color-fx",
+        action="store_true",
+        help="Enable simple music-driven color FX (beat pop + warm/cool tint).",
     )
     parser.add_argument(
         "--color-coherence",
@@ -1262,6 +1308,7 @@ if __name__ == "__main__":
         cadence=args.cadence,
         user_prompt=args.prompt,
         prompt_change_every_beats=args.prompt_change_every_beats,
+        music_color_fx=args.music_color_fx,
         color_coherence_mode=args.color_coherence,
         color_coherence_strength=args.color_coherence_strength,
         prompt_mode=args.prompt_mode,
