@@ -76,6 +76,7 @@ def _build_run_args(
     concept_mode: str,
     identity_prompt: str,
     user_prompt: str,
+    prompt_change_every_beats: int,
     color_coherence_mode: str,
     color_coherence_strength: float,
     re_anchor: bool,
@@ -119,6 +120,7 @@ def _build_run_args(
         "concept_mode": str(concept_mode),
         "identity_prompt": str(identity_prompt),
         "user_prompt": str(user_prompt),
+        "prompt_change_every_beats": int(prompt_change_every_beats),
         "color_coherence_mode": str(color_coherence_mode),
         "color_coherence_strength": float(color_coherence_strength),
         "re_anchor": bool(re_anchor),
@@ -188,6 +190,7 @@ def _save_resume_state(
     subject_controller: SubjectTransitionController,
     total_frames: int,
     fps: int,
+    prompt_state: Optional[Dict[str, int]],
     cli_args: Optional[list],
 ):
     payload = {
@@ -198,6 +201,7 @@ def _save_resume_state(
         "last_completed_frame": int(last_completed_frame),
         "seed_state": float(seed_state),
         "subject_controller": _controller_to_dict(subject_controller),
+        "prompt_state": prompt_state or {},
         "total_frames": int(total_frames),
         "fps": int(fps),
     }
@@ -268,11 +272,33 @@ def _apply_identity_anchor(prompt: str, lock_identity: bool, identity_prompt: st
     return f"{prompt}. Keep the same main subject identity: {anchor}."
 
 
-def _build_user_prompt(user_prompt: str) -> str:
-    p = str(user_prompt or "").strip()
-    if p:
-        return p
-    return "cinematic music video frame"
+def _parse_prompt_candidates(user_prompt: str):
+    """
+    Parse user prompt input as:
+    - single prompt string
+    - '||' separated prompt list
+    - JSON list string, e.g. ["prompt A", "prompt B"]
+    """
+    raw = str(user_prompt or "").strip()
+    if not raw:
+        return ["cinematic music video frame"]
+
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                items = [str(x).strip() for x in parsed if str(x).strip()]
+                if items:
+                    return items
+        except json.JSONDecodeError:
+            pass
+
+    if "||" in raw:
+        items = [x.strip() for x in raw.split("||") if x.strip()]
+        if items:
+            return items
+
+    return [raw]
 
 
 def _re_anchor_profile(level: str):
@@ -506,6 +532,7 @@ def run(
     concept_mode: str = "identity",
     identity_prompt: str = "",
     user_prompt: str = "",
+    prompt_change_every_beats: int = 1,
     color_coherence_mode: str = "none",
     color_coherence_strength: float = 0.60,
     re_anchor: bool = False,
@@ -557,6 +584,9 @@ def run(
     onset_curve = calibrate_feature_curve(features.onset, low_q=0.20, high_q=0.995, gamma=1.15)
     bright_curve = calibrate_feature_curve(features.brightness, low_q=0.05, high_q=0.98, gamma=1.0)
     pitch_curve = calibrate_feature_curve(features.pitch, low_q=0.10, high_q=0.95, gamma=1.0)
+    prompt_candidates = _parse_prompt_candidates(user_prompt)
+    prompt_change_every_beats = max(1, int(prompt_change_every_beats))
+    prompt_reactive_enabled = len(prompt_candidates) > 1 and (not disable_music_change)
 
     steady_activation_mode = str(steady_activation_mode or "auto").strip().lower()
     if steady_activation_mode not in ("auto", "manual"):
@@ -609,6 +639,7 @@ def run(
         concept_mode=concept_mode,
         identity_prompt=identity_prompt,
         user_prompt=user_prompt,
+        prompt_change_every_beats=prompt_change_every_beats,
         color_coherence_mode=color_coherence_mode,
         color_coherence_strength=color_coherence_strength,
         re_anchor=re_anchor,
@@ -681,8 +712,15 @@ def run(
     else:
         print("Steady shift: OFF")
     print(f"Camera motion: {'OFF' if disable_camera_motion else 'ON'}")
-    if str(user_prompt).strip():
-        print(f"User prompt: {user_prompt}")
+    if len(prompt_candidates) > 1:
+        print(
+            "User prompts: "
+            f"{len(prompt_candidates)} items "
+            f"(reactive={'ON' if prompt_reactive_enabled else 'OFF'}, "
+            f"change_every={prompt_change_every_beats} beat(s))"
+        )
+    elif str(user_prompt).strip():
+        print(f"User prompt: {prompt_candidates[0]}")
     print(f"Output: {output_dir}/")
     print(f"Resume state: {resume_state_file.name}")
 
@@ -710,6 +748,8 @@ def run(
     current = None
     reference_frame = None
     start_frame = 0
+    active_prompt_idx = 0
+    beat_events_seen_for_prompt = 0
 
     if resume_dir:
         loaded = _load_resume_state(output_dir, args_slug)
@@ -751,6 +791,28 @@ def run(
                 subject_controller,
                 loaded.get("subject_controller", {}),
             )
+            loaded_prompt_state = loaded.get("prompt_state", {})
+            if isinstance(loaded_prompt_state, dict) and loaded_prompt_state:
+                active_prompt_idx = int(loaded_prompt_state.get("active_prompt_idx", 0))
+                beat_events_seen_for_prompt = int(
+                    loaded_prompt_state.get("beat_events_seen_for_prompt", 0)
+                )
+            else:
+                # Backward compatibility with old resume files:
+                # reconstruct prompt progression from completed frames.
+                if prompt_reactive_enabled:
+                    beat_events_seen_for_prompt = sum(
+                        1 for b in features.beat_frames if 1 <= int(b) <= last_frame
+                    )
+                    active_prompt_idx = (
+                        beat_events_seen_for_prompt // prompt_change_every_beats
+                    ) % max(1, len(prompt_candidates))
+                else:
+                    beat_events_seen_for_prompt = 0
+                    active_prompt_idx = 0
+
+            if prompt_candidates:
+                active_prompt_idx %= len(prompt_candidates)
             print(
                 f"Resuming from frame {start_frame} using state "
                 f"{Path(loaded['_state_file']).name}"
@@ -772,7 +834,7 @@ def run(
             current = _load_and_resize_init_image(init_image, width=width, height=height)
             print("Loaded init image as frame 0.")
         else:
-            first_prompt = _build_user_prompt(user_prompt)
+            first_prompt = prompt_candidates[active_prompt_idx]
             current = generator.generate_from_text(prompt=first_prompt, seed=42)
         reference_frame = current.copy()
         current.save(output_dir / "frame_00000.png")
@@ -785,9 +847,17 @@ def run(
             subject_controller=subject_controller,
             total_frames=total_frames,
             fps=fps,
+            prompt_state={
+                "active_prompt_idx": int(active_prompt_idx),
+                "beat_events_seen_for_prompt": int(beat_events_seen_for_prompt),
+            },
             cli_args=cli_args,
         )
         start_frame = 1
+
+    if not prompt_reactive_enabled:
+        active_prompt_idx = 0
+        beat_events_seen_for_prompt = 0
 
     if start_frame >= total_frames:
         print("All frames already generated; skipping frame generation.")
@@ -878,7 +948,15 @@ def run(
                 translation_y=controls["ty_delta"],
             )
 
-        prompt = _build_user_prompt(user_prompt)
+        prompt_switched = 0
+        if prompt_reactive_enabled and (frame in beat_set):
+            beat_events_seen_for_prompt += 1
+            if beat_events_seen_for_prompt % prompt_change_every_beats == 0:
+                prev_prompt_idx = active_prompt_idx
+                active_prompt_idx = (active_prompt_idx + 1) % len(prompt_candidates)
+                prompt_switched = int(active_prompt_idx != prev_prompt_idx)
+
+        prompt = prompt_candidates[active_prompt_idx]
         transition_active = False
         prompt = _apply_identity_anchor(prompt, lock_identity=lock_identity, identity_prompt=identity_prompt)
 
@@ -978,6 +1056,10 @@ def run(
             subject_controller=subject_controller,
             total_frames=total_frames,
             fps=fps,
+            prompt_state={
+                "active_prompt_idx": int(active_prompt_idx),
+                "beat_events_seen_for_prompt": int(beat_events_seen_for_prompt),
+            },
             cli_args=cli_args,
         )
 
@@ -989,6 +1071,7 @@ def run(
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
                 f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} "
+                f"pidx={active_prompt_idx} psw={prompt_switched} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
                 f"cscale={used_control_scale:.3f} cn={'ON' if use_controlnet else 'OFF'} "
                 f"ra={int(re_anchor_applied)}"
@@ -1022,7 +1105,17 @@ if __name__ == "__main__":
         "--prompt",
         type=str,
         default="",
-        help="User prompt override. In init-image identity mode, this is the main prompt.",
+        help=(
+            "User prompt override. Supports single prompt or prompt list with '||' "
+            "separator (or JSON list string). In init-image identity mode, this is "
+            "the main prompt source."
+        ),
+    )
+    parser.add_argument(
+        "--prompt-change-every-beats",
+        type=int,
+        default=1,
+        help="When using prompt lists, switch to next prompt every N detected beats.",
     )
     parser.add_argument(
         "--color-coherence",
@@ -1168,6 +1261,7 @@ if __name__ == "__main__":
         mode=args.mode,
         cadence=args.cadence,
         user_prompt=args.prompt,
+        prompt_change_every_beats=args.prompt_change_every_beats,
         color_coherence_mode=args.color_coherence,
         color_coherence_strength=args.color_coherence_strength,
         prompt_mode=args.prompt_mode,
