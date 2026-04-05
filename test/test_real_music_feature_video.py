@@ -78,6 +78,7 @@ def _build_run_args(
     user_prompt: str,
     prompt_change_every_beats: int,
     music_color_fx: bool,
+    onset_jitter: bool,
     color_coherence_mode: str,
     color_coherence_strength: float,
     re_anchor: bool,
@@ -123,6 +124,7 @@ def _build_run_args(
         "user_prompt": str(user_prompt),
         "prompt_change_every_beats": int(prompt_change_every_beats),
         "music_color_fx": bool(music_color_fx),
+        "onset_jitter": bool(onset_jitter),
         "color_coherence_mode": str(color_coherence_mode),
         "color_coherence_strength": float(color_coherence_strength),
         "re_anchor": bool(re_anchor),
@@ -327,6 +329,41 @@ def _apply_music_color_fx(
     tint_alpha = max(0.02, min(0.14, tint_alpha))
     overlay = Image.new("RGB", out.size, tint_color)
     out = Image.blend(out, overlay, tint_alpha)
+    return out
+
+
+def _apply_onset_jitter_controls(
+    controls: Dict[str, float],
+    onset_value: float,
+    frame: int,
+    mapper_cfg: MusicMappingConfig,
+) -> Dict[str, float]:
+    """
+    Small deterministic shutter/jitter from onset spikes.
+    """
+    onset_v = float(max(0.0, min(1.0, onset_value)))
+    if onset_v < 0.35:
+        return controls
+
+    amp = (onset_v - 0.35) / 0.65
+    rng = np.random.default_rng(100000 + int(frame))
+
+    jitter_px = 0.5 + 2.7 * amp
+    jitter_ang = 0.10 + 0.90 * amp
+    dx = float(rng.uniform(-1.0, 1.0)) * jitter_px
+    dy = float(rng.uniform(-1.0, 1.0)) * jitter_px
+    da = float(rng.uniform(-1.0, 1.0)) * jitter_ang
+
+    out = dict(controls)
+    out["tx_delta"] = float(out["tx_delta"] + dx)
+    out["ty_delta"] = float(out["ty_delta"] + dy)
+    out["angle_delta"] = float(out["angle_delta"] + da)
+
+    pan_cap = float(mapper_cfg.pan_abs_max)
+    ang_cap = float(mapper_cfg.angle_abs_max)
+    out["tx_delta"] = max(-pan_cap, min(pan_cap, out["tx_delta"]))
+    out["ty_delta"] = max(-pan_cap, min(pan_cap, out["ty_delta"]))
+    out["angle_delta"] = max(-ang_cap, min(ang_cap, out["angle_delta"]))
     return out
 
 
@@ -563,6 +600,7 @@ def run(
     user_prompt: str = "",
     prompt_change_every_beats: int = 1,
     music_color_fx: bool = False,
+    onset_jitter: bool = False,
     color_coherence_mode: str = "none",
     color_coherence_strength: float = 0.60,
     re_anchor: bool = False,
@@ -671,6 +709,7 @@ def run(
         user_prompt=user_prompt,
         prompt_change_every_beats=prompt_change_every_beats,
         music_color_fx=music_color_fx,
+        onset_jitter=onset_jitter,
         color_coherence_mode=color_coherence_mode,
         color_coherence_strength=color_coherence_strength,
         re_anchor=re_anchor,
@@ -715,6 +754,7 @@ def run(
     else:
         print("Init image: OFF")
     print(f"Music color FX: {'ON' if music_color_fx else 'OFF'}")
+    print(f"Onset jitter: {'ON' if onset_jitter else 'OFF'}")
     print(f"Color coherence: {color_coherence_mode} (strength={color_coherence_strength:.2f})")
     print(
         f"Re-anchor: {'ON' if re_anchor else 'OFF'} "
@@ -797,6 +837,7 @@ def run(
                     "steady_activation_ratio",
                     "steady_shift_probability",
                     "music_color_fx",
+                    "onset_jitter",
                     "steady_min_seconds",
                     "steady_threshold",
                     "steady_shift_pixels",
@@ -969,6 +1010,16 @@ def run(
             steady_dir_y = 0.0
 
         steady_prev_active = bool(steady_active)
+        onset_jitter_active = 0
+        if onset_jitter and not disable_music_change:
+            if float(onset_curve[frame]) >= 0.35:
+                onset_jitter_active = 1
+            controls = _apply_onset_jitter_controls(
+                controls=controls,
+                onset_value=float(onset_curve[frame]),
+                frame=frame,
+                mapper_cfg=mapper_cfg,
+            )
 
         if disable_camera_motion:
             transformed = current.copy()
@@ -1112,6 +1163,7 @@ def run(
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
                 f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} "
+                f"jit={onset_jitter_active} "
                 f"pidx={active_prompt_idx} psw={prompt_switched} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
                 f"cscale={used_control_scale:.3f} cn={'ON' if use_controlnet else 'OFF'} "
@@ -1162,6 +1214,11 @@ if __name__ == "__main__":
         "--music-color-fx",
         action="store_true",
         help="Enable simple music-driven color FX (beat pop + warm/cool tint).",
+    )
+    parser.add_argument(
+        "--onset-jitter",
+        action="store_true",
+        help="Enable small shutter/jitter camera shake from onset spikes.",
     )
     parser.add_argument(
         "--color-coherence",
@@ -1309,6 +1366,7 @@ if __name__ == "__main__":
         user_prompt=args.prompt,
         prompt_change_every_beats=args.prompt_change_every_beats,
         music_color_fx=args.music_color_fx,
+        onset_jitter=args.onset_jitter,
         color_coherence_mode=args.color_coherence,
         color_coherence_strength=args.color_coherence_strength,
         prompt_mode=args.prompt_mode,
