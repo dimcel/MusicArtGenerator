@@ -93,6 +93,7 @@ def _build_run_args(
     steady_min_seconds: float,
     steady_threshold: float,
     steady_shift_pixels: float,
+    quiet_hold: bool,
 ) -> Dict[str, object]:
     init_image_abs = None
     if init_image:
@@ -139,6 +140,7 @@ def _build_run_args(
         "steady_min_seconds": float(steady_min_seconds),
         "steady_threshold": float(steady_threshold),
         "steady_shift_pixels": float(steady_shift_pixels),
+        "quiet_hold": bool(quiet_hold),
     }
 
 
@@ -565,6 +567,43 @@ def _build_auto_steady_activation_mask(
     }
 
 
+def _build_quiet_hold_mask(
+    energy_curve: np.ndarray,
+    onset_curve: np.ndarray,
+    fps: int,
+):
+    """
+    Build a simple quiet-section mask from low energy + low onset runs.
+    Internal thresholds are auto-derived; no user tuning args required.
+    """
+    energy = np.asarray(energy_curve, dtype=np.float32)
+    onset = np.asarray(onset_curve, dtype=np.float32)
+
+    if energy.size == 0 or onset.size == 0:
+        return np.zeros(0, dtype=bool), {
+            "energy_gate": 0.0,
+            "onset_gate": 0.0,
+            "min_run_frames": 0,
+            "quiet_frame_ratio": 0.0,
+            "quiet_runs": 0,
+        }
+
+    energy_gate = float(min(0.32, max(0.08, np.quantile(energy, 0.28))))
+    onset_gate = float(min(0.30, max(0.08, np.quantile(onset, 0.35))))
+    quiet_raw = np.logical_and(energy <= energy_gate, onset <= onset_gate)
+    min_run_frames = max(3, int(round(0.35 * fps)))
+    quiet_mask = _remove_short_true_runs(quiet_raw, min_len=min_run_frames)
+    quiet_runs = _extract_true_runs(quiet_mask)
+
+    return quiet_mask.astype(bool), {
+        "energy_gate": energy_gate,
+        "onset_gate": onset_gate,
+        "min_run_frames": min_run_frames,
+        "quiet_frame_ratio": float(np.asarray(quiet_mask, dtype=np.float32).mean()),
+        "quiet_runs": len(quiet_runs),
+    }
+
+
 def _steady_direction_from_features(pitch: float, brightness: float):
     """
     Temporary debug behavior: force right-only shift.
@@ -615,6 +654,7 @@ def run(
     steady_min_seconds: float = 1.0,
     steady_threshold: float = 0.72,
     steady_shift_pixels: float = 6.0,
+    quiet_hold: bool = False,
     resume_dir: Optional[str] = None,
     cli_args: Optional[list] = None,
 ):
@@ -682,6 +722,14 @@ def run(
             activation_ratio=steady_activation_ratio,
             shift_probability=steady_shift_probability,
         )
+    quiet_hold_mask = None
+    quiet_hold_meta = None
+    if quiet_hold:
+        quiet_hold_mask, quiet_hold_meta = _build_quiet_hold_mask(
+            energy_curve=energy_curve,
+            onset_curve=onset_curve,
+            fps=fps,
+        )
 
     run_args = _build_run_args(
         audio_path=audio_path,
@@ -724,6 +772,7 @@ def run(
         steady_min_seconds=steady_min_seconds,
         steady_threshold=steady_threshold,
         steady_shift_pixels=steady_shift_pixels,
+        quiet_hold=quiet_hold,
     )
     args_slug = _build_args_slug(run_args)
     lock_identity = bool(init_image) and concept_mode == "identity"
@@ -755,6 +804,17 @@ def run(
         print("Init image: OFF")
     print(f"Music color FX: {'ON' if music_color_fx else 'OFF'}")
     print(f"Onset jitter: {'ON' if onset_jitter else 'OFF'}")
+    if quiet_hold and quiet_hold_meta is not None:
+        print(
+            "Quiet hold: ON "
+            f"(eg<={quiet_hold_meta['energy_gate']:.2f}, "
+            f"on<={quiet_hold_meta['onset_gate']:.2f}, "
+            f"min_run={quiet_hold_meta['min_run_frames']}f, "
+            f"runs={quiet_hold_meta['quiet_runs']}, "
+            f"active_f={quiet_hold_meta['quiet_frame_ratio']:.2f})"
+        )
+    else:
+        print("Quiet hold: OFF")
     print(f"Color coherence: {color_coherence_mode} (strength={color_coherence_strength:.2f})")
     print(
         f"Re-anchor: {'ON' if re_anchor else 'OFF'} "
@@ -841,6 +901,7 @@ def run(
                     "steady_min_seconds",
                     "steady_threshold",
                     "steady_shift_pixels",
+                    "quiet_hold",
                 ):
                     if k not in loaded_run_args_cmp and k in run_args:
                         loaded_run_args_cmp[k] = run_args[k]
@@ -972,10 +1033,44 @@ def run(
                 "prompt_level": 2,
                 "seed_jump": 0,
             }
+        quiet_active = (
+            bool(quiet_hold)
+            and (not disable_music_change)
+            and (quiet_hold_mask is not None)
+            and frame < int(quiet_hold_mask.size)
+            and bool(quiet_hold_mask[frame])
+        )
+        if quiet_active:
+            # Keep motion calmer during detected quiet sections.
+            controls["zoom_delta"] = float(1.0 + 0.20 * (float(controls["zoom_delta"]) - 1.0))
+            controls["tx_delta"] = float(0.10 * float(controls["tx_delta"]))
+            controls["ty_delta"] = float(0.10 * float(controls["ty_delta"]))
+            controls["angle_delta"] = float(0.20 * float(controls["angle_delta"]))
+            controls["noise_amount"] = float(0.30 * float(controls["noise_amount"]))
+            controls["zoom_delta"] = max(
+                float(mapper_cfg.zoom_min),
+                min(float(mapper_cfg.zoom_max), float(controls["zoom_delta"])),
+            )
+            controls["tx_delta"] = max(
+                -float(mapper_cfg.pan_abs_max),
+                min(float(mapper_cfg.pan_abs_max), float(controls["tx_delta"])),
+            )
+            controls["ty_delta"] = max(
+                -float(mapper_cfg.pan_abs_max),
+                min(float(mapper_cfg.pan_abs_max), float(controls["ty_delta"])),
+            )
+            controls["angle_delta"] = max(
+                -float(mapper_cfg.angle_abs_max),
+                min(float(mapper_cfg.angle_abs_max), float(controls["angle_delta"])),
+            )
+            controls["noise_amount"] = max(
+                float(mapper_cfg.noise_min),
+                min(float(mapper_cfg.noise_max), float(controls["noise_amount"])),
+            )
 
         steady_active = False
         steady_direction = "none"
-        if steady_shift and not disable_music_change:
+        if steady_shift and not disable_music_change and not quiet_active:
             if steady_activation_mode == "auto":
                 steady_active = bool(steady_active_mask[frame]) if steady_active_mask is not None else False
             else:
@@ -1011,7 +1106,7 @@ def run(
 
         steady_prev_active = bool(steady_active)
         onset_jitter_active = 0
-        if onset_jitter and not disable_music_change:
+        if onset_jitter and not disable_music_change and not quiet_active:
             if float(onset_curve[frame]) >= 0.35:
                 onset_jitter_active = 1
             controls = _apply_onset_jitter_controls(
@@ -1033,7 +1128,7 @@ def run(
             )
 
         prompt_switched = 0
-        if prompt_reactive_enabled and (frame in beat_set):
+        if prompt_reactive_enabled and (frame in beat_set) and (not quiet_active):
             beat_events_seen_for_prompt += 1
             if beat_events_seen_for_prompt % prompt_change_every_beats == 0:
                 prev_prompt_idx = active_prompt_idx
@@ -1163,7 +1258,7 @@ def run(
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
                 f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} "
-                f"jit={onset_jitter_active} "
+                f"qh={int(quiet_active)} jit={onset_jitter_active} "
                 f"pidx={active_prompt_idx} psw={prompt_switched} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
                 f"cscale={used_control_scale:.3f} cn={'ON' if use_controlnet else 'OFF'} "
@@ -1219,6 +1314,11 @@ if __name__ == "__main__":
         "--onset-jitter",
         action="store_true",
         help="Enable small shutter/jitter camera shake from onset spikes.",
+    )
+    parser.add_argument(
+        "--quiet-hold",
+        action="store_true",
+        help="Detect quiet sections and calm motion (less zoom/pan/angle/noise), pause jitter and prompt switches.",
     )
     parser.add_argument(
         "--color-coherence",
@@ -1367,6 +1467,7 @@ if __name__ == "__main__":
         prompt_change_every_beats=args.prompt_change_every_beats,
         music_color_fx=args.music_color_fx,
         onset_jitter=args.onset_jitter,
+        quiet_hold=args.quiet_hold,
         color_coherence_mode=args.color_coherence,
         color_coherence_strength=args.color_coherence_strength,
         prompt_mode=args.prompt_mode,
