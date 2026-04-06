@@ -22,7 +22,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-from PIL import Image
+import numpy as np
+from PIL import Image, ImageEnhance
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT.parent))
@@ -67,18 +68,32 @@ def _build_run_args(
     control_scale_base: float,
     control_scale_beat_boost: float,
     control_scale_onset_boost: float,
+    zoom_base: float,
+    zoom_beat_boost: float,
     canny_low: int,
     canny_high: int,
     init_image: Optional[str],
     concept_mode: str,
     identity_prompt: str,
     user_prompt: str,
+    prompt_change_every_beats: int,
+    music_color_fx: bool,
+    onset_jitter: bool,
     color_coherence_mode: str,
     color_coherence_strength: float,
     re_anchor: bool,
     re_anchor_strength: str,
     re_anchor_every_frames: int,
     disable_camera_motion: bool,
+    disable_music_change: bool,
+    steady_shift: bool,
+    steady_activation_mode: str,
+    steady_activation_ratio: float,
+    steady_shift_probability: float,
+    steady_min_seconds: float,
+    steady_threshold: float,
+    steady_shift_pixels: float,
+    quiet_hold: bool,
 ) -> Dict[str, object]:
     init_image_abs = None
     if init_image:
@@ -100,18 +115,32 @@ def _build_run_args(
         "control_scale_base": float(control_scale_base),
         "control_scale_beat_boost": float(control_scale_beat_boost),
         "control_scale_onset_boost": float(control_scale_onset_boost),
+        "zoom_base": float(zoom_base),
+        "zoom_beat_boost": float(zoom_beat_boost),
         "canny_low": int(canny_low),
         "canny_high": int(canny_high),
         "init_image": init_image_abs,
         "concept_mode": str(concept_mode),
         "identity_prompt": str(identity_prompt),
         "user_prompt": str(user_prompt),
+        "prompt_change_every_beats": int(prompt_change_every_beats),
+        "music_color_fx": bool(music_color_fx),
+        "onset_jitter": bool(onset_jitter),
         "color_coherence_mode": str(color_coherence_mode),
         "color_coherence_strength": float(color_coherence_strength),
         "re_anchor": bool(re_anchor),
         "re_anchor_strength": str(re_anchor_strength),
         "re_anchor_every_frames": int(re_anchor_every_frames),
         "disable_camera_motion": bool(disable_camera_motion),
+        "disable_music_change": bool(disable_music_change),
+        "steady_shift": bool(steady_shift),
+        "steady_activation_mode": str(steady_activation_mode),
+        "steady_activation_ratio": float(steady_activation_ratio),
+        "steady_shift_probability": float(steady_shift_probability),
+        "steady_min_seconds": float(steady_min_seconds),
+        "steady_threshold": float(steady_threshold),
+        "steady_shift_pixels": float(steady_shift_pixels),
+        "quiet_hold": bool(quiet_hold),
     }
 
 
@@ -167,6 +196,7 @@ def _save_resume_state(
     subject_controller: SubjectTransitionController,
     total_frames: int,
     fps: int,
+    prompt_state: Optional[Dict[str, int]],
     cli_args: Optional[list],
 ):
     payload = {
@@ -177,6 +207,7 @@ def _save_resume_state(
         "last_completed_frame": int(last_completed_frame),
         "seed_state": float(seed_state),
         "subject_controller": _controller_to_dict(subject_controller),
+        "prompt_state": prompt_state or {},
         "total_frames": int(total_frames),
         "fps": int(fps),
     }
@@ -247,11 +278,100 @@ def _apply_identity_anchor(prompt: str, lock_identity: bool, identity_prompt: st
     return f"{prompt}. Keep the same main subject identity: {anchor}."
 
 
-def _build_user_prompt(user_prompt: str) -> str:
-    p = str(user_prompt or "").strip()
-    if p:
-        return p
-    return "cinematic music video frame"
+def _parse_prompt_candidates(user_prompt: str):
+    """
+    Parse user prompt input as:
+    - single prompt string
+    - '||' separated prompt list
+    - JSON list string, e.g. ["prompt A", "prompt B"]
+    """
+    raw = str(user_prompt or "").strip()
+    if not raw:
+        return ["cinematic music video frame"]
+
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                items = [str(x).strip() for x in parsed if str(x).strip()]
+                if items:
+                    return items
+        except json.JSONDecodeError:
+            pass
+
+    if "||" in raw:
+        items = [x.strip() for x in raw.split("||") if x.strip()]
+        if items:
+            return items
+
+    return [raw]
+
+
+def _apply_music_color_fx(
+    image: Image.Image,
+    beat_pulse: float,
+    energy: float,
+    brightness: float,
+) -> Image.Image:
+    """
+    Simple music color FX:
+    - beat/energy -> saturation + contrast pop
+    - brightness -> warm/cool tint direction
+    """
+    sat = 1.0 + 0.18 * float(beat_pulse) + 0.08 * (float(energy) - 0.5)
+    sat = max(0.88, min(1.32, sat))
+    contrast = 1.0 + 0.12 * float(beat_pulse) + 0.05 * (float(energy) - 0.5)
+    contrast = max(0.90, min(1.25, contrast))
+
+    out = ImageEnhance.Color(image).enhance(sat)
+    out = ImageEnhance.Contrast(out).enhance(contrast)
+
+    tint_color = (220, 235, 255) if float(brightness) >= 0.55 else (255, 235, 220)
+    tint_alpha = 0.04 + 0.10 * float(beat_pulse)
+    tint_alpha = max(0.02, min(0.14, tint_alpha))
+    overlay = Image.new("RGB", out.size, tint_color)
+    out = Image.blend(out, overlay, tint_alpha)
+    return out
+
+
+def _apply_onset_jitter_controls(
+    controls: Dict[str, float],
+    onset_value: float,
+    frame: int,
+    mapper_cfg: MusicMappingConfig,
+    jitter_strength: float = 1.0,
+) -> Dict[str, float]:
+    """
+    Small deterministic shutter/jitter from onset spikes.
+    """
+    strength = float(max(0.0, min(1.0, jitter_strength)))
+    if strength <= 1e-6:
+        return controls
+
+    onset_v = float(max(0.0, min(1.0, onset_value)))
+    if onset_v < 0.35:
+        return controls
+
+    amp = (onset_v - 0.35) / 0.65
+    rng = np.random.default_rng(100000 + int(frame))
+
+    jitter_px = (0.5 + 2.7 * amp) * strength
+    jitter_ang = (0.10 + 0.90 * amp) * strength
+    dx = float(rng.uniform(-1.0, 1.0)) * jitter_px
+    dy = float(rng.uniform(-1.0, 1.0)) * jitter_px
+    da = float(rng.uniform(-1.0, 1.0)) * jitter_ang
+
+    out = dict(controls)
+    out["tx_delta"] = float(out["tx_delta"] + dx)
+    out["ty_delta"] = float(out["ty_delta"] + dy)
+    out["angle_delta"] = float(out["angle_delta"] + da)
+
+    pan_cap = float(mapper_cfg.pan_abs_max)
+    ang_cap = float(mapper_cfg.angle_abs_max)
+    out["tx_delta"] = max(-pan_cap, min(pan_cap, out["tx_delta"]))
+    out["ty_delta"] = max(-pan_cap, min(pan_cap, out["ty_delta"]))
+    out["angle_delta"] = max(-ang_cap, min(ang_cap, out["angle_delta"]))
+    return out
 
 
 def _re_anchor_profile(level: str):
@@ -272,6 +392,253 @@ def _re_anchor_profile(level: str):
     return alpha, 0.42, 0.01, 1.10
 
 
+def _build_stability_curve(
+    onset_curve: np.ndarray,
+    pitch_curve: np.ndarray,
+    bright_curve: np.ndarray,
+) -> np.ndarray:
+    """
+    Estimate melodic steadiness in [0, 1].
+    High values mean:
+    - low onset activity
+    - low frame-to-frame pitch change
+    - low frame-to-frame brightness change
+    """
+    if onset_curve.size == 0:
+        return onset_curve
+
+    pitch_delta = np.abs(np.diff(pitch_curve, prepend=float(pitch_curve[0])))
+    bright_delta = np.abs(np.diff(bright_curve, prepend=float(bright_curve[0])))
+
+    # Heavier onset penalty; pitch/brightness deltas capture "steady note" behavior.
+    stability = 1.0 - (
+        0.62 * onset_curve
+        + 1.20 * pitch_delta
+        + 0.55 * bright_delta
+    )
+    return np.clip(stability, 0.0, 1.0).astype(np.float32)
+
+
+def _build_stable_run_lengths(
+    stability_curve: np.ndarray,
+    threshold: float,
+) -> np.ndarray:
+    """
+    For each frame, count consecutive frames ending at i with stability >= threshold.
+    """
+    out = np.zeros_like(stability_curve, dtype=np.int32)
+    run = 0
+    for i, v in enumerate(stability_curve):
+        if float(v) >= threshold:
+            run += 1
+        else:
+            run = 0
+        out[i] = run
+    return out
+
+
+def _remove_short_true_runs(mask: np.ndarray, min_len: int) -> np.ndarray:
+    """
+    Remove active runs shorter than min_len from a boolean mask.
+    """
+    m = np.asarray(mask, dtype=bool).copy()
+    if m.size == 0 or min_len <= 1:
+        return m
+
+    start = -1
+    for i in range(m.size + 1):
+        is_on = bool(m[i]) if i < m.size else False
+        if is_on and start < 0:
+            start = i
+        if (not is_on) and start >= 0:
+            if i - start < min_len:
+                m[start:i] = False
+            start = -1
+    return m
+
+
+def _extract_true_runs(mask: np.ndarray):
+    """
+    Return list of (start_inclusive, end_exclusive) for True runs.
+    """
+    m = np.asarray(mask, dtype=bool)
+    runs = []
+    start = -1
+    for i in range(m.size + 1):
+        is_on = bool(m[i]) if i < m.size else False
+        if is_on and start < 0:
+            start = i
+        if (not is_on) and start >= 0:
+            runs.append((start, i))
+            start = -1
+    return runs
+
+
+def _build_auto_steady_activation_mask(
+    stability_curve: np.ndarray,
+    energy_curve: np.ndarray,
+    onset_curve: np.ndarray,
+    beat_frames: list,
+    fps: int,
+    activation_ratio: float = 1.0,
+    shift_probability: float = 1.0,
+):
+    """
+    Build an activation mask directly from music features.
+    activation_ratio applies to eligible stable runs (not all frames).
+    shift_probability is per-run keep probability after ratio selection.
+    """
+    stability = np.asarray(stability_curve, dtype=np.float32)
+    energy = np.asarray(energy_curve, dtype=np.float32)
+    onset = np.asarray(onset_curve, dtype=np.float32)
+
+    if stability.size == 0:
+        return np.zeros(0, dtype=bool), {
+            "stable_threshold": 0.0,
+            "activation_ratio": float(activation_ratio),
+            "shift_probability": float(shift_probability),
+            "eligible_frame_ratio": 0.0,
+            "actual_frame_ratio": 0.0,
+            "min_run_frames": 0,
+            "beat_span_frames": 0,
+            "energy_gate": 0.0,
+            "eligible_runs": 0,
+            "selected_runs": 0,
+            "active_runs": 0,
+        }
+
+    # Require "present" signal energy so near-silent or very low-energy
+    # stable regions don't trigger directional motion.
+    energy_gate = float(max(0.08, np.quantile(energy, 0.35)))
+    energy_ok = energy >= energy_gate
+
+    stability_no_onset = np.clip(stability - 0.30 * onset, 0.0, 1.0)
+    score = np.clip(stability_no_onset * np.asarray(energy_ok, dtype=np.float32), 0.0, 1.0)
+    stable_threshold = float(max(0.55, np.quantile(stability_no_onset, 0.60)))
+
+    if len(beat_frames) >= 2:
+        beat_arr = np.asarray(sorted(beat_frames), dtype=np.int32)
+        beat_gaps = np.diff(beat_arr)
+        beat_span = int(np.median(beat_gaps)) if beat_gaps.size else max(2, int(0.5 * fps))
+    else:
+        beat_span = max(2, int(0.5 * fps))
+
+    min_run_frames = max(3, int(round(0.45 * beat_span)))
+    eligible_raw = np.logical_and(stability_no_onset >= stable_threshold, energy_ok)
+    eligible_mask = _remove_short_true_runs(eligible_raw, min_len=min_run_frames)
+    eligible_runs = _extract_true_runs(eligible_mask)
+    eligible_frame_ratio = float(np.asarray(eligible_mask, dtype=np.float32).mean())
+
+    activation_ratio = max(0.0, min(1.0, float(activation_ratio)))
+    shift_probability = max(0.0, min(1.0, float(shift_probability)))
+
+    selected_runs = []
+    if eligible_runs and activation_ratio > 0.0:
+        run_scores = []
+        for idx, (a, b) in enumerate(eligible_runs):
+            run_score = float(np.mean(score[a:b])) if b > a else 0.0
+            run_scores.append((run_score, idx))
+
+        run_scores.sort(reverse=True, key=lambda x: x[0])
+        keep_count = int(round(activation_ratio * len(eligible_runs)))
+        keep_count = min(len(eligible_runs), max(0, keep_count))
+        if keep_count == 0 and activation_ratio > 0.0:
+            keep_count = 1
+        selected_indices = sorted(idx for _, idx in run_scores[:keep_count])
+        selected_runs = [eligible_runs[i] for i in selected_indices]
+
+    active_mask = np.zeros_like(eligible_mask, dtype=bool)
+    if selected_runs and shift_probability > 0.0:
+        rng = np.random.default_rng(42)
+        for a, b in selected_runs:
+            if float(rng.random()) <= shift_probability:
+                active_mask[a:b] = True
+
+    active_runs = _extract_true_runs(active_mask)
+    actual_frame_ratio = float(np.asarray(active_mask, dtype=np.float32).mean())
+
+    return active_mask.astype(bool), {
+        "stable_threshold": stable_threshold,
+        "activation_ratio": activation_ratio,
+        "shift_probability": shift_probability,
+        "eligible_frame_ratio": eligible_frame_ratio,
+        "actual_frame_ratio": actual_frame_ratio,
+        "min_run_frames": min_run_frames,
+        "beat_span_frames": beat_span,
+        "energy_gate": energy_gate,
+        "eligible_runs": len(eligible_runs),
+        "selected_runs": len(selected_runs),
+        "active_runs": len(active_runs),
+    }
+
+
+def _build_quiet_hold_mask(
+    energy_curve: np.ndarray,
+    onset_curve: np.ndarray,
+    fps: int,
+):
+    """
+    Build a simple quiet-section mask from low energy + low onset runs.
+    Internal thresholds are auto-derived; no user tuning args required.
+    """
+    energy = np.asarray(energy_curve, dtype=np.float32)
+    onset = np.asarray(onset_curve, dtype=np.float32)
+
+    if energy.size == 0 or onset.size == 0:
+        return np.zeros(0, dtype=bool), {
+            "energy_gate": 0.0,
+            "onset_gate": 0.0,
+            "min_run_frames": 0,
+            "quiet_frame_ratio": 0.0,
+            "quiet_runs": 0,
+        }
+
+    energy_gate = float(min(0.32, max(0.08, np.quantile(energy, 0.28))))
+    onset_gate = float(min(0.30, max(0.08, np.quantile(onset, 0.35))))
+    quiet_raw = np.logical_and(energy <= energy_gate, onset <= onset_gate)
+    min_run_frames = max(3, int(round(0.35 * fps)))
+    quiet_mask = _remove_short_true_runs(quiet_raw, min_len=min_run_frames)
+    quiet_runs = _extract_true_runs(quiet_mask)
+
+    return quiet_mask.astype(bool), {
+        "energy_gate": energy_gate,
+        "onset_gate": onset_gate,
+        "min_run_frames": min_run_frames,
+        "quiet_frame_ratio": float(np.asarray(quiet_mask, dtype=np.float32).mean()),
+        "quiet_runs": len(quiet_runs),
+    }
+
+
+def _build_soft_run_gain(mask: np.ndarray, fade_frames: int) -> np.ndarray:
+    """
+    Build a 0..1 gain curve per True run with linear fade-in/out.
+    """
+    m = np.asarray(mask, dtype=bool)
+    out = np.zeros(m.shape, dtype=np.float32)
+    if m.size == 0:
+        return out
+
+    fade = max(1, int(fade_frames))
+    for a, b in _extract_true_runs(m):
+        if b <= a:
+            continue
+        for i in range(a, b):
+            d_in = i - a + 1
+            d_out = b - i
+            g_in = min(1.0, float(d_in) / float(fade))
+            g_out = min(1.0, float(d_out) / float(fade))
+            out[i] = float(min(g_in, g_out))
+    return out
+
+
+def _steady_direction_from_features(pitch: float, brightness: float):
+    """
+    Temporary debug behavior: force right-only shift.
+    """
+    _ = pitch, brightness
+    return "right", 1.0, 0.0
+
+
 def run(
     audio_path: str,
     fps: int = 24,
@@ -289,18 +656,32 @@ def run(
     control_scale_base: float = 0.80,
     control_scale_beat_boost: float = 0.30,
     control_scale_onset_boost: float = 0.20,
+    zoom_base: float = 1.002,
+    zoom_beat_boost: float = 0.020,
     canny_low: int = 100,
     canny_high: int = 200,
     init_image: Optional[str] = None,
     concept_mode: str = "identity",
     identity_prompt: str = "",
     user_prompt: str = "",
+    prompt_change_every_beats: int = 1,
+    music_color_fx: bool = False,
+    onset_jitter: bool = False,
     color_coherence_mode: str = "none",
     color_coherence_strength: float = 0.60,
     re_anchor: bool = False,
     re_anchor_strength: str = "mid",
     re_anchor_every_frames: int = 12,
     disable_camera_motion: bool = False,
+    disable_music_change: bool = False,
+    steady_shift: bool = False,
+    steady_activation_mode: str = "auto",
+    steady_activation_ratio: float = 1.0,
+    steady_shift_probability: float = 1.0,
+    steady_min_seconds: float = 1.0,
+    steady_threshold: float = 0.72,
+    steady_shift_pixels: float = 6.0,
+    quiet_hold: bool = False,
     resume_dir: Optional[str] = None,
     cli_args: Optional[list] = None,
 ):
@@ -315,6 +696,19 @@ def run(
     features = extractor.extract(total_frames=total_frames)
     beat_set = set(features.beat_frames)
     mapper_cfg = MusicMappingConfig(
+        # Test profile: camera motion driven by zoom only (energy + beat pulse).
+        zoom_base=float(zoom_base),
+        zoom_energy_boost=0.008,
+        zoom_beat_boost=float(zoom_beat_boost),
+        zoom_min=0.995,
+        zoom_max=1.045,
+        # Disable pan/rotation camera movement for isolation tests.
+        pan_base=0.0,
+        pan_onset_boost=0.0,
+        pan_wave_amp=0.0,
+        angle_base=0.0,
+        angle_onset_boost=0.0,
+        angle_wave_amp=0.0,
         control_scale_base=float(control_scale_base),
         control_scale_beat_boost=float(control_scale_beat_boost),
         control_scale_onset_boost=float(control_scale_onset_boost),
@@ -325,6 +719,49 @@ def run(
     onset_curve = calibrate_feature_curve(features.onset, low_q=0.20, high_q=0.995, gamma=1.15)
     bright_curve = calibrate_feature_curve(features.brightness, low_q=0.05, high_q=0.98, gamma=1.0)
     pitch_curve = calibrate_feature_curve(features.pitch, low_q=0.10, high_q=0.95, gamma=1.0)
+    prompt_candidates = _parse_prompt_candidates(user_prompt)
+    prompt_change_every_beats = max(1, int(prompt_change_every_beats))
+    prompt_reactive_enabled = len(prompt_candidates) > 1 and (not disable_music_change)
+
+    steady_activation_mode = str(steady_activation_mode or "auto").strip().lower()
+    if steady_activation_mode not in ("auto", "manual"):
+        raise ValueError("steady_activation_mode must be 'auto' or 'manual'")
+
+    steady_activation_ratio = max(0.0, min(1.0, float(steady_activation_ratio)))
+    steady_shift_probability = max(0.0, min(1.0, float(steady_shift_probability)))
+    steady_threshold = max(0.0, min(1.0, float(steady_threshold)))
+    steady_shift_pixels = abs(float(steady_shift_pixels))
+    steady_min_frames = max(1, int(round(max(0.05, float(steady_min_seconds)) * fps)))
+    stability_curve = _build_stability_curve(onset_curve, pitch_curve, bright_curve)
+
+    stable_run_lengths = None
+    steady_active_mask = None
+    steady_auto_meta = None
+    if steady_activation_mode == "manual":
+        stable_run_lengths = _build_stable_run_lengths(stability_curve, threshold=steady_threshold)
+    else:
+        steady_active_mask, steady_auto_meta = _build_auto_steady_activation_mask(
+            stability_curve=stability_curve,
+            energy_curve=energy_curve,
+            onset_curve=onset_curve,
+            beat_frames=features.beat_frames,
+            fps=fps,
+            activation_ratio=steady_activation_ratio,
+            shift_probability=steady_shift_probability,
+        )
+    quiet_hold_mask = None
+    quiet_hold_gain = None
+    quiet_hold_meta = None
+    if quiet_hold:
+        quiet_hold_mask, quiet_hold_meta = _build_quiet_hold_mask(
+            energy_curve=energy_curve,
+            onset_curve=onset_curve,
+            fps=fps,
+        )
+        quiet_fade_frames = max(2, int(round(0.35 * fps)))
+        quiet_hold_gain = _build_soft_run_gain(quiet_hold_mask, fade_frames=quiet_fade_frames)
+        quiet_hold_meta["fade_frames"] = int(quiet_fade_frames)
+
     run_args = _build_run_args(
         audio_path=audio_path,
         fps=fps,
@@ -341,18 +778,32 @@ def run(
         control_scale_base=control_scale_base,
         control_scale_beat_boost=control_scale_beat_boost,
         control_scale_onset_boost=control_scale_onset_boost,
+        zoom_base=zoom_base,
+        zoom_beat_boost=zoom_beat_boost,
         canny_low=canny_low,
         canny_high=canny_high,
         init_image=init_image,
         concept_mode=concept_mode,
         identity_prompt=identity_prompt,
         user_prompt=user_prompt,
+        prompt_change_every_beats=prompt_change_every_beats,
+        music_color_fx=music_color_fx,
+        onset_jitter=onset_jitter,
         color_coherence_mode=color_coherence_mode,
         color_coherence_strength=color_coherence_strength,
         re_anchor=re_anchor,
         re_anchor_strength=re_anchor_strength,
         re_anchor_every_frames=re_anchor_every_frames,
         disable_camera_motion=disable_camera_motion,
+        disable_music_change=disable_music_change,
+        steady_shift=steady_shift,
+        steady_activation_mode=steady_activation_mode,
+        steady_activation_ratio=steady_activation_ratio,
+        steady_shift_probability=steady_shift_probability,
+        steady_min_seconds=steady_min_seconds,
+        steady_threshold=steady_threshold,
+        steady_shift_pixels=steady_shift_pixels,
+        quiet_hold=quiet_hold,
     )
     args_slug = _build_args_slug(run_args)
     lock_identity = bool(init_image) and concept_mode == "identity"
@@ -382,14 +833,58 @@ def run(
         print(f"Init image: {init_image} (concept_mode={concept_mode})")
     else:
         print("Init image: OFF")
+    print(f"Music color FX: {'ON' if music_color_fx else 'OFF'}")
+    print(f"Onset jitter: {'ON' if onset_jitter else 'OFF'}")
+    if quiet_hold and quiet_hold_meta is not None:
+        print(
+            "Quiet hold: ON "
+            f"(eg<={quiet_hold_meta['energy_gate']:.2f}, "
+            f"on<={quiet_hold_meta['onset_gate']:.2f}, "
+            f"min_run={quiet_hold_meta['min_run_frames']}f, "
+            f"fade={quiet_hold_meta['fade_frames']}f, "
+            f"runs={quiet_hold_meta['quiet_runs']}, "
+            f"active_f={quiet_hold_meta['quiet_frame_ratio']:.2f})"
+        )
+    else:
+        print("Quiet hold: OFF")
     print(f"Color coherence: {color_coherence_mode} (strength={color_coherence_strength:.2f})")
     print(
         f"Re-anchor: {'ON' if re_anchor else 'OFF'} "
         f"(strength={re_anchor_strength}, every={max(1, int(re_anchor_every_frames))}f)"
     )
+    if steady_shift:
+        if steady_activation_mode == "auto" and steady_auto_meta is not None:
+            print(
+                "Steady shift: ON "
+                f"(mode=auto, run_ratio={steady_auto_meta['activation_ratio']:.2f}, "
+                f"run_prob={steady_auto_meta['shift_probability']:.2f}, "
+                f"eligible_runs={steady_auto_meta['eligible_runs']}, "
+                f"active_runs={steady_auto_meta['active_runs']}, "
+                f"eligible_f={steady_auto_meta['eligible_frame_ratio']:.2f}, "
+                f"active_f={steady_auto_meta['actual_frame_ratio']:.2f}, "
+                f"sth={steady_auto_meta['stable_threshold']:.2f}, "
+                f"eg={steady_auto_meta['energy_gate']:.2f}, "
+                f"min_run={steady_auto_meta['min_run_frames']}f, "
+                f"px={steady_shift_pixels:.2f})"
+            )
+        else:
+            print(
+                "Steady shift: ON "
+                f"(mode=manual, min={steady_min_seconds:.2f}s/{steady_min_frames}f, "
+                f"thr={steady_threshold:.2f}, px={steady_shift_pixels:.2f})"
+            )
+    else:
+        print("Steady shift: OFF")
     print(f"Camera motion: {'OFF' if disable_camera_motion else 'ON'}")
-    if str(user_prompt).strip():
-        print(f"User prompt: {user_prompt}")
+    if len(prompt_candidates) > 1:
+        print(
+            "User prompts: "
+            f"{len(prompt_candidates)} items "
+            f"(reactive={'ON' if prompt_reactive_enabled else 'OFF'}, "
+            f"change_every={prompt_change_every_beats} beat(s))"
+        )
+    elif str(user_prompt).strip():
+        print(f"User prompt: {prompt_candidates[0]}")
     print(f"Output: {output_dir}/")
     print(f"Resume state: {resume_state_file.name}")
 
@@ -417,12 +912,35 @@ def run(
     current = None
     reference_frame = None
     start_frame = 0
+    active_prompt_idx = 0
+    beat_events_seen_for_prompt = 0
 
     if resume_dir:
         loaded = _load_resume_state(output_dir, args_slug)
         if loaded is not None:
             loaded_run_args = loaded.get("run_args")
-            if loaded_run_args and loaded_run_args != run_args:
+            if loaded_run_args:
+                loaded_run_args_cmp = dict(loaded_run_args)
+                # Backward compatibility with resume states created
+                # before steady-shift options existed.
+                for k in (
+                    "steady_shift",
+                    "steady_activation_mode",
+                    "steady_activation_ratio",
+                    "steady_shift_probability",
+                    "music_color_fx",
+                    "onset_jitter",
+                    "steady_min_seconds",
+                    "steady_threshold",
+                    "steady_shift_pixels",
+                    "quiet_hold",
+                ):
+                    if k not in loaded_run_args_cmp and k in run_args:
+                        loaded_run_args_cmp[k] = run_args[k]
+            else:
+                loaded_run_args_cmp = None
+
+            if loaded_run_args_cmp and loaded_run_args_cmp != run_args:
                 raise RuntimeError(
                     "Resume state exists but run arguments differ from current command. "
                     "Use the same arguments, or choose a different resume directory."
@@ -440,6 +958,28 @@ def run(
                 subject_controller,
                 loaded.get("subject_controller", {}),
             )
+            loaded_prompt_state = loaded.get("prompt_state", {})
+            if isinstance(loaded_prompt_state, dict) and loaded_prompt_state:
+                active_prompt_idx = int(loaded_prompt_state.get("active_prompt_idx", 0))
+                beat_events_seen_for_prompt = int(
+                    loaded_prompt_state.get("beat_events_seen_for_prompt", 0)
+                )
+            else:
+                # Backward compatibility with old resume files:
+                # reconstruct prompt progression from completed frames.
+                if prompt_reactive_enabled:
+                    beat_events_seen_for_prompt = sum(
+                        1 for b in features.beat_frames if 1 <= int(b) <= last_frame
+                    )
+                    active_prompt_idx = (
+                        beat_events_seen_for_prompt // prompt_change_every_beats
+                    ) % max(1, len(prompt_candidates))
+                else:
+                    beat_events_seen_for_prompt = 0
+                    active_prompt_idx = 0
+
+            if prompt_candidates:
+                active_prompt_idx %= len(prompt_candidates)
             print(
                 f"Resuming from frame {start_frame} using state "
                 f"{Path(loaded['_state_file']).name}"
@@ -461,7 +1001,7 @@ def run(
             current = _load_and_resize_init_image(init_image, width=width, height=height)
             print("Loaded init image as frame 0.")
         else:
-            first_prompt = _build_user_prompt(user_prompt)
+            first_prompt = prompt_candidates[active_prompt_idx]
             current = generator.generate_from_text(prompt=first_prompt, seed=42)
         reference_frame = current.copy()
         current.save(output_dir / "frame_00000.png")
@@ -474,12 +1014,25 @@ def run(
             subject_controller=subject_controller,
             total_frames=total_frames,
             fps=fps,
+            prompt_state={
+                "active_prompt_idx": int(active_prompt_idx),
+                "beat_events_seen_for_prompt": int(beat_events_seen_for_prompt),
+            },
             cli_args=cli_args,
         )
         start_frame = 1
 
+    if not prompt_reactive_enabled:
+        active_prompt_idx = 0
+        beat_events_seen_for_prompt = 0
+
     if start_frame >= total_frames:
         print("All frames already generated; skipping frame generation.")
+
+    steady_prev_active = False
+    steady_dir_label = "none"
+    steady_dir_x = 0.0
+    steady_dir_y = 0.0
 
     for frame in range(start_frame, total_frames):
         if reference_frame is None:
@@ -498,6 +1051,110 @@ def run(
             cfg=mapper_cfg,
         )
 
+        if disable_music_change:
+            controls = {
+                "strength": float(mapper_cfg.strength_base),
+                "cfg_scale": float(mapper_cfg.cfg_base),
+                "zoom_delta": float(mapper_cfg.zoom_base),
+                "tx_delta": float(mapper_cfg.pan_base),
+                "ty_delta": float(0.35 * mapper_cfg.pan_base),
+                "angle_delta": float(mapper_cfg.angle_base),
+                "noise_amount": float(mapper_cfg.noise_base),
+                "control_scale": float(mapper_cfg.control_scale_base),
+                "prompt_drive": 0.5,
+                "prompt_level": 2,
+                "seed_jump": 0,
+            }
+        quiet_gain = 0.0
+        if bool(quiet_hold) and (not disable_music_change) and (quiet_hold_gain is not None):
+            if frame < int(quiet_hold_gain.size):
+                quiet_gain = float(quiet_hold_gain[frame])
+        quiet_active = (
+            quiet_gain >= 0.55
+        )
+        if quiet_gain > 1e-6:
+            # Soft quiet-hold: blend towards calmer controls.
+            zoom_keep = 1.0 - 0.80 * quiet_gain
+            pan_keep = 1.0 - 0.90 * quiet_gain
+            angle_keep = 1.0 - 0.80 * quiet_gain
+            noise_keep = 1.0 - 0.70 * quiet_gain
+
+            controls["zoom_delta"] = float(1.0 + (float(controls["zoom_delta"]) - 1.0) * zoom_keep)
+            controls["tx_delta"] = float(pan_keep * float(controls["tx_delta"]))
+            controls["ty_delta"] = float(pan_keep * float(controls["ty_delta"]))
+            controls["angle_delta"] = float(angle_keep * float(controls["angle_delta"]))
+            controls["noise_amount"] = float(noise_keep * float(controls["noise_amount"]))
+            controls["zoom_delta"] = max(
+                float(mapper_cfg.zoom_min),
+                min(float(mapper_cfg.zoom_max), float(controls["zoom_delta"])),
+            )
+            controls["tx_delta"] = max(
+                -float(mapper_cfg.pan_abs_max),
+                min(float(mapper_cfg.pan_abs_max), float(controls["tx_delta"])),
+            )
+            controls["ty_delta"] = max(
+                -float(mapper_cfg.pan_abs_max),
+                min(float(mapper_cfg.pan_abs_max), float(controls["ty_delta"])),
+            )
+            controls["angle_delta"] = max(
+                -float(mapper_cfg.angle_abs_max),
+                min(float(mapper_cfg.angle_abs_max), float(controls["angle_delta"])),
+            )
+            controls["noise_amount"] = max(
+                float(mapper_cfg.noise_min),
+                min(float(mapper_cfg.noise_max), float(controls["noise_amount"])),
+            )
+
+        steady_active = False
+        steady_direction = "none"
+        if steady_shift and not disable_music_change and not quiet_active:
+            if steady_activation_mode == "auto":
+                steady_active = bool(steady_active_mask[frame]) if steady_active_mask is not None else False
+            else:
+                steady_active = (
+                    bool(stable_run_lengths is not None)
+                    and int(stable_run_lengths[frame]) >= steady_min_frames
+                )
+
+            if steady_active:
+                if not steady_prev_active:
+                    steady_dir_label, steady_dir_x, steady_dir_y = _steady_direction_from_features(
+                        pitch=float(pitch_curve[frame]),
+                        brightness=float(bright_curve[frame]),
+                    )
+                steady_direction = steady_dir_label
+                stability_gain = float(stability_curve[frame])
+                shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
+
+                controls["tx_delta"] = float(controls["tx_delta"] + steady_dir_x * shift_px)
+                controls["ty_delta"] = float(controls["ty_delta"] + steady_dir_y * shift_px)
+
+                pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
+                controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
+                controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
+            else:
+                steady_dir_label = "none"
+                steady_dir_x = 0.0
+                steady_dir_y = 0.0
+        else:
+            steady_dir_label = "none"
+            steady_dir_x = 0.0
+            steady_dir_y = 0.0
+
+        steady_prev_active = bool(steady_active)
+        onset_jitter_active = 0
+        jitter_strength = 1.0 - quiet_gain
+        if onset_jitter and not disable_music_change and jitter_strength > 1e-6:
+            if float(onset_curve[frame]) >= 0.35 and jitter_strength > 0.05:
+                onset_jitter_active = 1
+            controls = _apply_onset_jitter_controls(
+                controls=controls,
+                onset_value=float(onset_curve[frame]),
+                frame=frame,
+                mapper_cfg=mapper_cfg,
+                jitter_strength=jitter_strength,
+            )
+
         if disable_camera_motion:
             transformed = current.copy()
         else:
@@ -509,7 +1166,15 @@ def run(
                 translation_y=controls["ty_delta"],
             )
 
-        prompt = _build_user_prompt(user_prompt)
+        prompt_switched = 0
+        if prompt_reactive_enabled and (frame in beat_set) and (not quiet_active):
+            beat_events_seen_for_prompt += 1
+            if beat_events_seen_for_prompt % prompt_change_every_beats == 0:
+                prev_prompt_idx = active_prompt_idx
+                active_prompt_idx = (active_prompt_idx + 1) % len(prompt_candidates)
+                prompt_switched = int(active_prompt_idx != prev_prompt_idx)
+
+        prompt = prompt_candidates[active_prompt_idx]
         transition_active = False
         prompt = _apply_identity_anchor(prompt, lock_identity=lock_identity, identity_prompt=identity_prompt)
 
@@ -599,6 +1264,14 @@ def run(
                 strength=color_coherence_strength,
             )
 
+        if music_color_fx and not disable_music_change:
+            current = _apply_music_color_fx(
+                current,
+                beat_pulse=float(features.beat_pulse[frame]),
+                energy=float(energy_curve[frame]),
+                brightness=float(bright_curve[frame]),
+            )
+
         current.save(output_dir / f"frame_{frame:05d}.png")
         _save_resume_state(
             state_file=resume_state_file,
@@ -609,6 +1282,10 @@ def run(
             subject_controller=subject_controller,
             total_frames=total_frames,
             fps=fps,
+            prompt_state={
+                "active_prompt_idx": int(active_prompt_idx),
+                "beat_events_seen_for_prompt": int(beat_events_seen_for_prompt),
+            },
             cli_args=cli_args,
         )
 
@@ -618,7 +1295,10 @@ def run(
                 f"{frame:>4}/{total_frames-1} [{beat_tag}] "
                 f"eng={energy_curve[frame]:.2f} onset={onset_curve[frame]:.2f} pitch={pitch_curve[frame]:.2f} "
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
-                f"zoom={controls['zoom_delta']:.4f} pan={controls['tx_delta']:+.2f} "
+                f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
+                f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} "
+                f"qh={int(quiet_active)} qg={quiet_gain:.2f} jit={onset_jitter_active} "
+                f"pidx={active_prompt_idx} psw={prompt_switched} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
                 f"cscale={used_control_scale:.3f} cn={'ON' if use_controlnet else 'OFF'} "
                 f"ra={int(re_anchor_applied)}"
@@ -652,7 +1332,32 @@ if __name__ == "__main__":
         "--prompt",
         type=str,
         default="",
-        help="User prompt override. In init-image identity mode, this is the main prompt.",
+        help=(
+            "User prompt override. Supports single prompt or prompt list with '||' "
+            "separator (or JSON list string). In init-image identity mode, this is "
+            "the main prompt source."
+        ),
+    )
+    parser.add_argument(
+        "--prompt-change-every-beats",
+        type=int,
+        default=1,
+        help="When using prompt lists, switch to next prompt every N detected beats.",
+    )
+    parser.add_argument(
+        "--music-color-fx",
+        action="store_true",
+        help="Enable simple music-driven color FX (beat pop + warm/cool tint).",
+    )
+    parser.add_argument(
+        "--onset-jitter",
+        action="store_true",
+        help="Enable small shutter/jitter camera shake from onset spikes.",
+    )
+    parser.add_argument(
+        "--quiet-hold",
+        action="store_true",
+        help="Detect quiet sections and calm motion (less zoom/pan/angle/noise), pause jitter and prompt switches.",
     )
     parser.add_argument(
         "--color-coherence",
@@ -688,6 +1393,49 @@ if __name__ == "__main__":
     parser.add_argument("--control-scale-base", type=float, default=0.80)
     parser.add_argument("--control-scale-beat-boost", type=float, default=0.30)
     parser.add_argument("--control-scale-onset-boost", type=float, default=0.20)
+    parser.add_argument("--zoom-base", type=float, default=1.002, help="Base per-frame zoom multiplier for test profile.")
+    parser.add_argument("--zoom-beat-boost", type=float, default=0.020, help="Additional zoom multiplier from beat pulse for test profile.")
+    parser.add_argument(
+        "--steady-shift",
+        action="store_true",
+        help="Enable aggressive pan direction during musically stable sections.",
+    )
+    parser.add_argument(
+        "--steady-activation-mode",
+        choices=["auto", "manual"],
+        default="auto",
+        help="auto=derive activation duration from music features, manual=use threshold+min-seconds.",
+    )
+    parser.add_argument(
+        "--steady-activation-ratio",
+        type=float,
+        default=1.0,
+        help="Auto mode: fraction of eligible music-driven shift runs to keep (0..1).",
+    )
+    parser.add_argument(
+        "--steady-shift-probability",
+        type=float,
+        default=1.0,
+        help="Auto mode: per-selected-run probability that shift is applied (0..1).",
+    )
+    parser.add_argument(
+        "--steady-min-seconds",
+        type=float,
+        default=1.0,
+        help="Manual mode only: minimum consecutive stable duration before shift activates.",
+    )
+    parser.add_argument(
+        "--steady-threshold",
+        type=float,
+        default=0.72,
+        help="Manual mode only: stability threshold in [0,1] for steady-shift activation.",
+    )
+    parser.add_argument(
+        "--steady-shift-pixels",
+        type=float,
+        default=6.0,
+        help="Base pan magnitude (pixels/frame) while steady-shift is active.",
+    )
     parser.add_argument("--canny-low", type=int, default=100)
     parser.add_argument("--canny-high", type=int, default=200)
     parser.add_argument(
@@ -734,6 +1482,11 @@ if __name__ == "__main__":
         help="Disable zoom/pan/rotation transform and keep camera static.",
     )
     parser.add_argument(
+        "--disable-music-change",
+        action="store_true",
+        help="Disable music-driven control changes and use fixed controls each frame.",
+    )
+    parser.add_argument(
         "--resume-dir",
         type=str,
         default=None,
@@ -750,6 +1503,10 @@ if __name__ == "__main__":
         mode=args.mode,
         cadence=args.cadence,
         user_prompt=args.prompt,
+        prompt_change_every_beats=args.prompt_change_every_beats,
+        music_color_fx=args.music_color_fx,
+        onset_jitter=args.onset_jitter,
+        quiet_hold=args.quiet_hold,
         color_coherence_mode=args.color_coherence,
         color_coherence_strength=args.color_coherence_strength,
         prompt_mode=args.prompt_mode,
@@ -764,6 +1521,15 @@ if __name__ == "__main__":
         control_scale_base=args.control_scale_base,
         control_scale_beat_boost=args.control_scale_beat_boost,
         control_scale_onset_boost=args.control_scale_onset_boost,
+        zoom_base=args.zoom_base,
+        zoom_beat_boost=args.zoom_beat_boost,
+        steady_shift=args.steady_shift,
+        steady_activation_mode=args.steady_activation_mode,
+        steady_activation_ratio=args.steady_activation_ratio,
+        steady_shift_probability=args.steady_shift_probability,
+        steady_min_seconds=args.steady_min_seconds,
+        steady_threshold=args.steady_threshold,
+        steady_shift_pixels=args.steady_shift_pixels,
         canny_low=args.canny_low,
         canny_high=args.canny_high,
         init_image=args.init_image,
@@ -773,6 +1539,7 @@ if __name__ == "__main__":
         re_anchor_strength=args.re_anchor_strength,
         re_anchor_every_frames=args.re_anchor_every_frames,
         disable_camera_motion=args.disable_camera_motion,
+        disable_music_change=args.disable_music_change,
         resume_dir=args.resume_dir,
         cli_args=sys.argv[1:],
     )
