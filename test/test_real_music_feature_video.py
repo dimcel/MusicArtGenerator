@@ -339,10 +339,15 @@ def _apply_onset_jitter_controls(
     onset_value: float,
     frame: int,
     mapper_cfg: MusicMappingConfig,
+    jitter_strength: float = 1.0,
 ) -> Dict[str, float]:
     """
     Small deterministic shutter/jitter from onset spikes.
     """
+    strength = float(max(0.0, min(1.0, jitter_strength)))
+    if strength <= 1e-6:
+        return controls
+
     onset_v = float(max(0.0, min(1.0, onset_value)))
     if onset_v < 0.35:
         return controls
@@ -350,8 +355,8 @@ def _apply_onset_jitter_controls(
     amp = (onset_v - 0.35) / 0.65
     rng = np.random.default_rng(100000 + int(frame))
 
-    jitter_px = 0.5 + 2.7 * amp
-    jitter_ang = 0.10 + 0.90 * amp
+    jitter_px = (0.5 + 2.7 * amp) * strength
+    jitter_ang = (0.10 + 0.90 * amp) * strength
     dx = float(rng.uniform(-1.0, 1.0)) * jitter_px
     dy = float(rng.uniform(-1.0, 1.0)) * jitter_px
     da = float(rng.uniform(-1.0, 1.0)) * jitter_ang
@@ -604,6 +609,28 @@ def _build_quiet_hold_mask(
     }
 
 
+def _build_soft_run_gain(mask: np.ndarray, fade_frames: int) -> np.ndarray:
+    """
+    Build a 0..1 gain curve per True run with linear fade-in/out.
+    """
+    m = np.asarray(mask, dtype=bool)
+    out = np.zeros(m.shape, dtype=np.float32)
+    if m.size == 0:
+        return out
+
+    fade = max(1, int(fade_frames))
+    for a, b in _extract_true_runs(m):
+        if b <= a:
+            continue
+        for i in range(a, b):
+            d_in = i - a + 1
+            d_out = b - i
+            g_in = min(1.0, float(d_in) / float(fade))
+            g_out = min(1.0, float(d_out) / float(fade))
+            out[i] = float(min(g_in, g_out))
+    return out
+
+
 def _steady_direction_from_features(pitch: float, brightness: float):
     """
     Temporary debug behavior: force right-only shift.
@@ -723,6 +750,7 @@ def run(
             shift_probability=steady_shift_probability,
         )
     quiet_hold_mask = None
+    quiet_hold_gain = None
     quiet_hold_meta = None
     if quiet_hold:
         quiet_hold_mask, quiet_hold_meta = _build_quiet_hold_mask(
@@ -730,6 +758,9 @@ def run(
             onset_curve=onset_curve,
             fps=fps,
         )
+        quiet_fade_frames = max(2, int(round(0.35 * fps)))
+        quiet_hold_gain = _build_soft_run_gain(quiet_hold_mask, fade_frames=quiet_fade_frames)
+        quiet_hold_meta["fade_frames"] = int(quiet_fade_frames)
 
     run_args = _build_run_args(
         audio_path=audio_path,
@@ -810,6 +841,7 @@ def run(
             f"(eg<={quiet_hold_meta['energy_gate']:.2f}, "
             f"on<={quiet_hold_meta['onset_gate']:.2f}, "
             f"min_run={quiet_hold_meta['min_run_frames']}f, "
+            f"fade={quiet_hold_meta['fade_frames']}f, "
             f"runs={quiet_hold_meta['quiet_runs']}, "
             f"active_f={quiet_hold_meta['quiet_frame_ratio']:.2f})"
         )
@@ -1033,20 +1065,25 @@ def run(
                 "prompt_level": 2,
                 "seed_jump": 0,
             }
+        quiet_gain = 0.0
+        if bool(quiet_hold) and (not disable_music_change) and (quiet_hold_gain is not None):
+            if frame < int(quiet_hold_gain.size):
+                quiet_gain = float(quiet_hold_gain[frame])
         quiet_active = (
-            bool(quiet_hold)
-            and (not disable_music_change)
-            and (quiet_hold_mask is not None)
-            and frame < int(quiet_hold_mask.size)
-            and bool(quiet_hold_mask[frame])
+            quiet_gain >= 0.55
         )
-        if quiet_active:
-            # Keep motion calmer during detected quiet sections.
-            controls["zoom_delta"] = float(1.0 + 0.20 * (float(controls["zoom_delta"]) - 1.0))
-            controls["tx_delta"] = float(0.10 * float(controls["tx_delta"]))
-            controls["ty_delta"] = float(0.10 * float(controls["ty_delta"]))
-            controls["angle_delta"] = float(0.20 * float(controls["angle_delta"]))
-            controls["noise_amount"] = float(0.30 * float(controls["noise_amount"]))
+        if quiet_gain > 1e-6:
+            # Soft quiet-hold: blend towards calmer controls.
+            zoom_keep = 1.0 - 0.80 * quiet_gain
+            pan_keep = 1.0 - 0.90 * quiet_gain
+            angle_keep = 1.0 - 0.80 * quiet_gain
+            noise_keep = 1.0 - 0.70 * quiet_gain
+
+            controls["zoom_delta"] = float(1.0 + (float(controls["zoom_delta"]) - 1.0) * zoom_keep)
+            controls["tx_delta"] = float(pan_keep * float(controls["tx_delta"]))
+            controls["ty_delta"] = float(pan_keep * float(controls["ty_delta"]))
+            controls["angle_delta"] = float(angle_keep * float(controls["angle_delta"]))
+            controls["noise_amount"] = float(noise_keep * float(controls["noise_amount"]))
             controls["zoom_delta"] = max(
                 float(mapper_cfg.zoom_min),
                 min(float(mapper_cfg.zoom_max), float(controls["zoom_delta"])),
@@ -1106,14 +1143,16 @@ def run(
 
         steady_prev_active = bool(steady_active)
         onset_jitter_active = 0
-        if onset_jitter and not disable_music_change and not quiet_active:
-            if float(onset_curve[frame]) >= 0.35:
+        jitter_strength = 1.0 - quiet_gain
+        if onset_jitter and not disable_music_change and jitter_strength > 1e-6:
+            if float(onset_curve[frame]) >= 0.35 and jitter_strength > 0.05:
                 onset_jitter_active = 1
             controls = _apply_onset_jitter_controls(
                 controls=controls,
                 onset_value=float(onset_curve[frame]),
                 frame=frame,
                 mapper_cfg=mapper_cfg,
+                jitter_strength=jitter_strength,
             )
 
         if disable_camera_motion:
@@ -1258,7 +1297,7 @@ def run(
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
                 f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} "
-                f"qh={int(quiet_active)} jit={onset_jitter_active} "
+                f"qh={int(quiet_active)} qg={quiet_gain:.2f} jit={onset_jitter_active} "
                 f"pidx={active_prompt_idx} psw={prompt_switched} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
                 f"cscale={used_control_scale:.3f} cn={'ON' if use_controlnet else 'OFF'} "

@@ -313,11 +313,20 @@ def generate_debug_music_profile_track(
             x = pad + harmonic + beat + hiss
 
         else:  # quiet
-            # Quiet part with slight fade and minimal texture.
-            env = 0.020 + 0.030 * (1.0 - min(1.0, sec_local_t / section_seconds))
-            f = 160.0
+            # Quiet part with explicit soft in/out inside the section.
+            # This makes quiet-hold fade behavior easier to validate visually.
+            fade_seconds = min(0.45, 0.22 * section_seconds)
+            if fade_seconds <= 1e-6:
+                shape = 1.0
+            else:
+                in_gain = min(1.0, sec_local_t / fade_seconds)
+                out_gain = min(1.0, (section_seconds - sec_local_t) / fade_seconds)
+                shape = max(0.0, min(in_gain, out_gain))
+
+            env = 0.008 + 0.022 * shape
+            f = 160.0 + 2.0 * math.sin(2.0 * math.pi * 0.22 * sec_local_t)
             tone = env * math.sin(2.0 * math.pi * f * t)
-            hiss = 0.003 * (2.0 * random.random() - 1.0)
+            hiss = (0.0018 + 0.0012 * shape) * (2.0 * random.random() - 1.0)
             x = tone + hiss
 
         x = _soft_clip(x)
@@ -398,6 +407,11 @@ if __name__ == "__main__":
             for i in range(num_sections):
                 start = i * float(args.debug_section_seconds)
                 end = min(duration, (i + 1) * float(args.debug_section_seconds))
-                print(f"  {start:>4.1f}s - {end:>4.1f}s : {_debug_section_label(i)}")
+                start_frame = int(round(start * args.fps))
+                end_frame = min(args.frames - 1, int(round(end * args.fps)) - 1)
+                print(
+                    f"  {start:>4.1f}s - {end:>4.1f}s "
+                    f"(f{start_frame:03d}-f{end_frame:03d}) : {_debug_section_label(i)}"
+                )
 
     print(f"Created {out}")
