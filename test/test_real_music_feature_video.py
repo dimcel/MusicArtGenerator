@@ -93,6 +93,8 @@ def _build_run_args(
     steady_min_seconds: float,
     steady_threshold: float,
     steady_shift_pixels: float,
+    steady_twist: bool,
+    steady_twist_max_deg: float,
     quiet_hold: bool,
 ) -> Dict[str, object]:
     init_image_abs = None
@@ -140,6 +142,8 @@ def _build_run_args(
         "steady_min_seconds": float(steady_min_seconds),
         "steady_threshold": float(steady_threshold),
         "steady_shift_pixels": float(steady_shift_pixels),
+        "steady_twist": bool(steady_twist),
+        "steady_twist_max_deg": float(steady_twist_max_deg),
         "quiet_hold": bool(quiet_hold),
     }
 
@@ -681,6 +685,8 @@ def run(
     steady_min_seconds: float = 1.0,
     steady_threshold: float = 0.72,
     steady_shift_pixels: float = 6.0,
+    steady_twist: bool = False,
+    steady_twist_max_deg: float = 4.0,
     quiet_hold: bool = False,
     resume_dir: Optional[str] = None,
     cli_args: Optional[list] = None,
@@ -731,6 +737,7 @@ def run(
     steady_shift_probability = max(0.0, min(1.0, float(steady_shift_probability)))
     steady_threshold = max(0.0, min(1.0, float(steady_threshold)))
     steady_shift_pixels = abs(float(steady_shift_pixels))
+    steady_twist_max_deg = abs(float(steady_twist_max_deg))
     steady_min_frames = max(1, int(round(max(0.05, float(steady_min_seconds)) * fps)))
     stability_curve = _build_stability_curve(onset_curve, pitch_curve, bright_curve)
 
@@ -803,6 +810,8 @@ def run(
         steady_min_seconds=steady_min_seconds,
         steady_threshold=steady_threshold,
         steady_shift_pixels=steady_shift_pixels,
+        steady_twist=steady_twist,
+        steady_twist_max_deg=steady_twist_max_deg,
         quiet_hold=quiet_hold,
     )
     args_slug = _build_args_slug(run_args)
@@ -875,6 +884,23 @@ def run(
             )
     else:
         print("Steady shift: OFF")
+    if steady_twist:
+        if steady_activation_mode == "auto" and steady_auto_meta is not None:
+            print(
+                "Steady twist: ON "
+                f"(mode=auto, run_ratio={steady_auto_meta['activation_ratio']:.2f}, "
+                f"run_prob={steady_auto_meta['shift_probability']:.2f}, "
+                f"active_f={steady_auto_meta['actual_frame_ratio']:.2f}, "
+                f"max_deg={steady_twist_max_deg:.2f})"
+            )
+        else:
+            print(
+                "Steady twist: ON "
+                f"(mode=manual, min={steady_min_seconds:.2f}s/{steady_min_frames}f, "
+                f"thr={steady_threshold:.2f}, max_deg={steady_twist_max_deg:.2f})"
+            )
+    else:
+        print("Steady twist: OFF")
     print(f"Camera motion: {'OFF' if disable_camera_motion else 'ON'}")
     if len(prompt_candidates) > 1:
         print(
@@ -925,6 +951,8 @@ def run(
                 # before steady-shift options existed.
                 for k in (
                     "steady_shift",
+                    "steady_twist",
+                    "steady_twist_max_deg",
                     "steady_activation_mode",
                     "steady_activation_ratio",
                     "steady_shift_probability",
@@ -1033,6 +1061,7 @@ def run(
     steady_dir_label = "none"
     steady_dir_x = 0.0
     steady_dir_y = 0.0
+    steady_twist_deg = 0.0
 
     for frame in range(start_frame, total_frames):
         if reference_frame is None:
@@ -1107,7 +1136,7 @@ def run(
 
         steady_active = False
         steady_direction = "none"
-        if steady_shift and not disable_music_change and not quiet_active:
+        if (steady_shift or steady_twist) and not disable_music_change and not quiet_active:
             if steady_activation_mode == "auto":
                 steady_active = bool(steady_active_mask[frame]) if steady_active_mask is not None else False
             else:
@@ -1117,29 +1146,45 @@ def run(
                 )
 
             if steady_active:
-                if not steady_prev_active:
-                    steady_dir_label, steady_dir_x, steady_dir_y = _steady_direction_from_features(
-                        pitch=float(pitch_curve[frame]),
-                        brightness=float(bright_curve[frame]),
-                    )
-                steady_direction = steady_dir_label
                 stability_gain = float(stability_curve[frame])
-                shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
+                if steady_shift:
+                    if not steady_prev_active:
+                        steady_dir_label, steady_dir_x, steady_dir_y = _steady_direction_from_features(
+                            pitch=float(pitch_curve[frame]),
+                            brightness=float(bright_curve[frame]),
+                        )
+                    steady_direction = steady_dir_label
+                    shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
 
-                controls["tx_delta"] = float(controls["tx_delta"] + steady_dir_x * shift_px)
-                controls["ty_delta"] = float(controls["ty_delta"] + steady_dir_y * shift_px)
+                    controls["tx_delta"] = float(controls["tx_delta"] + steady_dir_x * shift_px)
+                    controls["ty_delta"] = float(controls["ty_delta"] + steady_dir_y * shift_px)
 
-                pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
-                controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
-                controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
+                    pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
+                    controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
+                    controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
+
+                if steady_twist:
+                    # Right-only twist: increase clockwise angle during stable sections.
+                    target_twist = steady_twist_max_deg * (0.25 + 0.75 * stability_gain)
+                else:
+                    target_twist = 0.0
             else:
                 steady_dir_label = "none"
                 steady_dir_x = 0.0
                 steady_dir_y = 0.0
+                target_twist = 0.0
         else:
             steady_dir_label = "none"
             steady_dir_x = 0.0
             steady_dir_y = 0.0
+            target_twist = 0.0
+
+        # Smooth ramp in/out for twist to avoid snapping.
+        steady_twist_deg = float(steady_twist_deg + 0.35 * (float(target_twist) - steady_twist_deg))
+        if steady_twist and abs(steady_twist_deg) > 1e-6:
+            controls["angle_delta"] = float(controls["angle_delta"] + steady_twist_deg)
+            ang_cap = max(float(mapper_cfg.angle_abs_max), steady_twist_max_deg * 2.0)
+            controls["angle_delta"] = max(-ang_cap, min(ang_cap, float(controls["angle_delta"])))
 
         steady_prev_active = bool(steady_active)
         onset_jitter_active = 0
@@ -1296,7 +1341,7 @@ def run(
                 f"eng={energy_curve[frame]:.2f} onset={onset_curve[frame]:.2f} pitch={pitch_curve[frame]:.2f} "
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
-                f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} "
+                f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} tw={steady_twist_deg:+.2f} "
                 f"qh={int(quiet_active)} qg={quiet_gain:.2f} jit={onset_jitter_active} "
                 f"pidx={active_prompt_idx} psw={prompt_switched} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
@@ -1436,6 +1481,17 @@ if __name__ == "__main__":
         default=6.0,
         help="Base pan magnitude (pixels/frame) while steady-shift is active.",
     )
+    parser.add_argument(
+        "--steady-twist",
+        action="store_true",
+        help="Enable right-only twist (angle pulse) during steady music sections.",
+    )
+    parser.add_argument(
+        "--steady-twist-max-deg",
+        type=float,
+        default=4.0,
+        help="Maximum extra twist angle (degrees/frame) while steady-twist is active.",
+    )
     parser.add_argument("--canny-low", type=int, default=100)
     parser.add_argument("--canny-high", type=int, default=200)
     parser.add_argument(
@@ -1530,6 +1586,8 @@ if __name__ == "__main__":
         steady_min_seconds=args.steady_min_seconds,
         steady_threshold=args.steady_threshold,
         steady_shift_pixels=args.steady_shift_pixels,
+        steady_twist=args.steady_twist,
+        steady_twist_max_deg=args.steady_twist_max_deg,
         canny_low=args.canny_low,
         canny_high=args.canny_high,
         init_image=args.init_image,
