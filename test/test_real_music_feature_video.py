@@ -635,6 +635,42 @@ def _build_soft_run_gain(mask: np.ndarray, fade_frames: int) -> np.ndarray:
     return out
 
 
+def _build_onset_twist_gain(
+    onset_curve: np.ndarray,
+    fps: int,
+):
+    """
+    Build right-twist gain [0,1] from onset spikes with short decay.
+    """
+    onset = np.asarray(onset_curve, dtype=np.float32)
+    if onset.size == 0:
+        return np.zeros(0, dtype=np.float32), {
+            "threshold": 0.0,
+            "decay_frames": 0,
+            "active_frame_ratio": 0.0,
+        }
+
+    threshold = float(max(0.32, np.quantile(onset, 0.70)))
+    denom = max(1e-6, 1.0 - threshold)
+    peak = np.clip((onset - threshold) / denom, 0.0, 1.0).astype(np.float32)
+
+    decay_frames = max(2, int(round(0.22 * fps)))
+    decay = float(np.exp(-1.0 / float(decay_frames)))
+    gain = np.zeros_like(peak, dtype=np.float32)
+    carry = 0.0
+    for i, v in enumerate(peak):
+        carry = max(float(v), carry * decay)
+        gain[i] = float(carry)
+
+    gain = np.clip(gain, 0.0, 1.0).astype(np.float32)
+    active_frame_ratio = float(np.asarray(gain > 0.05, dtype=np.float32).mean())
+    return gain, {
+        "threshold": threshold,
+        "decay_frames": decay_frames,
+        "active_frame_ratio": active_frame_ratio,
+    }
+
+
 def _steady_direction_from_features(pitch: float, brightness: float):
     """
     Temporary debug behavior: force right-only shift.
@@ -768,6 +804,13 @@ def run(
         quiet_fade_frames = max(2, int(round(0.35 * fps)))
         quiet_hold_gain = _build_soft_run_gain(quiet_hold_mask, fade_frames=quiet_fade_frames)
         quiet_hold_meta["fade_frames"] = int(quiet_fade_frames)
+    twist_onset_gain = None
+    twist_onset_meta = None
+    if steady_twist:
+        twist_onset_gain, twist_onset_meta = _build_onset_twist_gain(
+            onset_curve=onset_curve,
+            fps=fps,
+        )
 
     run_args = _build_run_args(
         audio_path=audio_path,
@@ -885,20 +928,16 @@ def run(
     else:
         print("Steady shift: OFF")
     if steady_twist:
-        if steady_activation_mode == "auto" and steady_auto_meta is not None:
+        if twist_onset_meta is not None:
             print(
                 "Steady twist: ON "
-                f"(mode=auto, run_ratio={steady_auto_meta['activation_ratio']:.2f}, "
-                f"run_prob={steady_auto_meta['shift_probability']:.2f}, "
-                f"active_f={steady_auto_meta['actual_frame_ratio']:.2f}, "
+                f"(trigger=onset, thr={twist_onset_meta['threshold']:.2f}, "
+                f"decay={twist_onset_meta['decay_frames']}f, "
+                f"active_f={twist_onset_meta['active_frame_ratio']:.2f}, "
                 f"max_deg={steady_twist_max_deg:.2f})"
             )
         else:
-            print(
-                "Steady twist: ON "
-                f"(mode=manual, min={steady_min_seconds:.2f}s/{steady_min_frames}f, "
-                f"thr={steady_threshold:.2f}, max_deg={steady_twist_max_deg:.2f})"
-            )
+            print(f"Steady twist: ON (trigger=onset, max_deg={steady_twist_max_deg:.2f})")
     else:
         print("Steady twist: OFF")
     print(f"Camera motion: {'OFF' if disable_camera_motion else 'ON'}")
@@ -1136,7 +1175,7 @@ def run(
 
         steady_active = False
         steady_direction = "none"
-        if (steady_shift or steady_twist) and not disable_music_change and not quiet_active:
+        if steady_shift and not disable_music_change and not quiet_active:
             if steady_activation_mode == "auto":
                 steady_active = bool(steady_active_mask[frame]) if steady_active_mask is not None else False
             else:
@@ -1147,40 +1186,39 @@ def run(
 
             if steady_active:
                 stability_gain = float(stability_curve[frame])
-                if steady_shift:
-                    if not steady_prev_active:
-                        steady_dir_label, steady_dir_x, steady_dir_y = _steady_direction_from_features(
-                            pitch=float(pitch_curve[frame]),
-                            brightness=float(bright_curve[frame]),
-                        )
-                    steady_direction = steady_dir_label
-                    shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
+                if not steady_prev_active:
+                    steady_dir_label, steady_dir_x, steady_dir_y = _steady_direction_from_features(
+                        pitch=float(pitch_curve[frame]),
+                        brightness=float(bright_curve[frame]),
+                    )
+                steady_direction = steady_dir_label
+                shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
 
-                    controls["tx_delta"] = float(controls["tx_delta"] + steady_dir_x * shift_px)
-                    controls["ty_delta"] = float(controls["ty_delta"] + steady_dir_y * shift_px)
+                controls["tx_delta"] = float(controls["tx_delta"] + steady_dir_x * shift_px)
+                controls["ty_delta"] = float(controls["ty_delta"] + steady_dir_y * shift_px)
 
-                    pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
-                    controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
-                    controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
-
-                if steady_twist:
-                    # Right-only twist: increase clockwise angle during stable sections.
-                    target_twist = steady_twist_max_deg * (0.25 + 0.75 * stability_gain)
-                else:
-                    target_twist = 0.0
+                pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
+                controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
+                controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
             else:
                 steady_dir_label = "none"
                 steady_dir_x = 0.0
                 steady_dir_y = 0.0
-                target_twist = 0.0
         else:
             steady_dir_label = "none"
             steady_dir_x = 0.0
             steady_dir_y = 0.0
-            target_twist = 0.0
-
-        # Smooth ramp in/out for twist to avoid snapping.
-        steady_twist_deg = float(steady_twist_deg + 0.35 * (float(target_twist) - steady_twist_deg))
+        twist_gain = 0.0
+        if (
+            steady_twist
+            and (not disable_music_change)
+            and (twist_onset_gain is not None)
+            and frame < int(twist_onset_gain.size)
+        ):
+            twist_gain = float(twist_onset_gain[frame])
+        target_twist = steady_twist_max_deg * twist_gain
+        # Smooth right-twist pulse from onset spikes.
+        steady_twist_deg = float(steady_twist_deg + 0.45 * (float(target_twist) - steady_twist_deg))
         if steady_twist and abs(steady_twist_deg) > 1e-6:
             controls["angle_delta"] = float(controls["angle_delta"] + steady_twist_deg)
             ang_cap = max(float(mapper_cfg.angle_abs_max), steady_twist_max_deg * 2.0)
@@ -1341,7 +1379,7 @@ def run(
                 f"eng={energy_curve[frame]:.2f} onset={onset_curve[frame]:.2f} pitch={pitch_curve[frame]:.2f} "
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
-                f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} tw={steady_twist_deg:+.2f} "
+                f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} tw={steady_twist_deg:+.2f} twg={twist_gain:.2f} "
                 f"qh={int(quiet_active)} qg={quiet_gain:.2f} jit={onset_jitter_active} "
                 f"pidx={active_prompt_idx} psw={prompt_switched} "
                 f"noise={used_noise:.3f} trans={int(transition_active)} "
