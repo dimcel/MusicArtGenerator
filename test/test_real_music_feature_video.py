@@ -11,6 +11,7 @@ Resume support:
 - Pass --resume-dir to continue an interrupted run.
 - Checkpoint is saved after each completed frame as:
   resume_state_<args_slug>.json
+- When resuming, --max-seconds is treated as additional seconds to append.
 """
 
 import argparse
@@ -111,7 +112,6 @@ def _build_run_args(
         "subject_hold_frames": int(subject_hold_frames),
         "subject_transition_frames": int(subject_transition_frames),
         "subject_smoothing_window": int(subject_smoothing_window),
-        "max_seconds": float(max_seconds),
         "use_controlnet": bool(use_controlnet),
         "controlnet_model": str(controlnet_model),
         "control_scale_base": float(control_scale_base),
@@ -729,13 +729,19 @@ def run(
 ):
     extractor = AudioFeatureExtractor(audio_path=audio_path, fps=fps).load()
 
+    audio_total_frames = max(2, int(extractor.duration_seconds * fps))
     if max_seconds is not None and max_seconds > 0:
-        total_frames = int(min(extractor.duration_seconds, max_seconds) * fps)
+        requested_frames = int(min(extractor.duration_seconds, max_seconds) * fps)
     else:
-        total_frames = int(extractor.duration_seconds * fps)
-    total_frames = max(2, total_frames)
+        requested_frames = audio_total_frames
+    requested_frames = max(2, requested_frames)
+    total_frames = requested_frames
 
-    features = extractor.extract(total_frames=total_frames)
+    # Resume runs may extend the target after reading the saved state.
+    # Keep full-track features available for safe indexing in that case.
+    feature_frames = audio_total_frames if resume_dir else requested_frames
+
+    features = extractor.extract(total_frames=feature_frames)
     beat_set = set(features.beat_frames)
     mapper_cfg = MusicMappingConfig(
         # Test profile: camera motion driven by zoom only (energy + beat pulse).
@@ -870,7 +876,10 @@ def run(
     resume_state_file = _state_path(output_dir, args_slug)
 
     print(f"Audio: {audio_path}")
-    print(f"Duration used: {total_frames / fps:.2f}s ({total_frames} frames @ {fps}fps)")
+    print(
+        f"Duration requested: {requested_frames / fps:.2f}s "
+        f"({requested_frames} frames @ {fps}fps)"
+    )
     print(f"BPM: {features.bpm:.1f}, beats: {len(features.beat_frames)}")
     print(f"Mode: {mode}, cadence: {cadence}, prompt_mode: {prompt_mode}, coherence: {coherence}")
     print(
@@ -1004,6 +1013,7 @@ def run(
                 ):
                     if k not in loaded_run_args_cmp and k in run_args:
                         loaded_run_args_cmp[k] = run_args[k]
+                loaded_run_args_cmp.pop("max_seconds", None)
             else:
                 loaded_run_args_cmp = None
 
@@ -1020,6 +1030,22 @@ def run(
                 )
             current = Image.open(frame_path).convert("RGB")
             start_frame = last_frame + 1
+
+            if max_seconds is not None and max_seconds > 0:
+                total_frames = min(audio_total_frames, start_frame + requested_frames)
+                generated_now = max(0, total_frames - start_frame)
+                print(
+                    "Resume extension: "
+                    f"requested +{max_seconds:.2f}s, "
+                    f"scheduled +{generated_now / fps:.2f}s "
+                    f"(target {total_frames / fps:.2f}s total)"
+                )
+            else:
+                total_frames = audio_total_frames
+                print(
+                    "Resume extension: full remaining audio "
+                    f"(target {total_frames / fps:.2f}s total)"
+                )
             seed_state = float(loaded.get("seed_state", 42.0))
             _controller_from_dict(
                 subject_controller,
@@ -1062,6 +1088,7 @@ def run(
                     "Use the same args as before, or clear/change resume directory."
                 )
             print("No resume state found. Starting from frame 0.")
+    print(f"Generation target: {total_frames / fps:.2f}s ({total_frames} frames @ {fps}fps)")
 
     if start_frame == 0:
         if init_image:
@@ -1463,7 +1490,11 @@ if __name__ == "__main__":
         "--max-seconds",
         type=float,
         default=12.0,
-        help="Limit runtime by using only first N seconds. <=0 means full audio.",
+        help=(
+            "Without --resume-dir: generate first N seconds from start. "
+            "With --resume-dir: append N more seconds from last completed frame. "
+            "<=0 means full audio."
+        ),
     )
     parser.add_argument("--with-audio", action="store_true")
     parser.add_argument("--controlnet", action="store_true", help="Enable ControlNet img2img (canny).")
@@ -1586,7 +1617,8 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Resume an interrupted run from this directory. "
-            "The script loads frame_*.png and resume_state_<args_slug>.json."
+            "The script loads frame_*.png and resume_state_<args_slug>.json. "
+            "When resuming, --max-seconds is treated as additional duration."
         ),
     )
     args = parser.parse_args()
