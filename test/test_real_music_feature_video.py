@@ -12,6 +12,7 @@ Resume support:
 - Checkpoint is saved after each completed frame as:
   resume_state_<args_slug>.json
 - When resuming, --max-seconds is treated as additional seconds to append.
+- Resume allows argument changes; changed args are reported.
 """
 
 import argparse
@@ -239,12 +240,32 @@ def _load_resume_state(
         data["_state_file"] = str(candidates[0])
         return data
     if len(candidates) > 1:
-        names = ", ".join(p.name for p in candidates)
-        raise RuntimeError(
-            "Multiple resume state files found and no exact args match. "
-            f"Available: {names}"
-        )
+        loaded_states = []
+        for p in candidates:
+            with p.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["_state_file"] = str(p)
+            loaded_states.append(data)
+
+        def _rank(item: Dict[str, object]):
+            state_file = Path(str(item["_state_file"]))
+            return (
+                int(item.get("last_completed_frame", -1)),
+                float(state_file.stat().st_mtime),
+            )
+
+        best = max(loaded_states, key=_rank)
+        best["_state_file_candidates"] = [Path(str(d["_state_file"])).name for d in loaded_states]
+        return best
     return None
+
+
+def _changed_run_arg_keys(previous: Dict[str, object], current: Dict[str, object]) -> list:
+    changed = []
+    for k in sorted(set(previous.keys()) | set(current.keys())):
+        if previous.get(k) != current.get(k):
+            changed.append(k)
+    return changed
 
 
 def _find_last_frame(output_dir: Path) -> int:
@@ -1017,17 +1038,30 @@ def run(
             else:
                 loaded_run_args_cmp = None
 
-            if loaded_run_args_cmp and loaded_run_args_cmp != run_args:
-                raise RuntimeError(
-                    "Resume state exists but run arguments differ from current command. "
-                    "Use the same arguments, or choose a different resume directory."
-                )
+            if loaded_run_args_cmp:
+                changed_keys = _changed_run_arg_keys(loaded_run_args_cmp, run_args)
+                if changed_keys:
+                    print(
+                        "Resume note: run arguments differ from saved state; "
+                        "continuing with new values."
+                    )
+                    print(f"Changed args ({len(changed_keys)}): {', '.join(changed_keys)}")
             last_frame = int(loaded.get("last_completed_frame", -1))
             frame_path = output_dir / f"frame_{last_frame:05d}.png"
             if not frame_path.exists():
                 raise RuntimeError(
                     f"Resume state points to missing frame: {frame_path}"
                 )
+            if "_state_file_candidates" in loaded:
+                candidate_names = loaded.get("_state_file_candidates", [])
+                print(
+                    "Resume note: multiple state files found; selected the most advanced one "
+                    f"({Path(str(loaded['_state_file'])).name})."
+                )
+                if candidate_names:
+                    print("Available states: " + ", ".join(candidate_names))
+            # Keep writing updates to the exact state file we resumed from.
+            resume_state_file = Path(str(loaded["_state_file"]))
             current = Image.open(frame_path).convert("RGB")
             start_frame = last_frame + 1
 
@@ -1084,8 +1118,8 @@ def run(
             last_frame = _find_last_frame(output_dir)
             if last_frame >= 0:
                 raise RuntimeError(
-                    "Found frames in resume dir but no resume state file for current args. "
-                    "Use the same args as before, or clear/change resume directory."
+                    "Found frames in resume dir but no resume state file. "
+                    "Clear/change resume directory or restore a resume_state_*.json file."
                 )
             print("No resume state found. Starting from frame 0.")
     print(f"Generation target: {total_frames / fps:.2f}s ({total_frames} frames @ {fps}fps)")
@@ -1618,7 +1652,8 @@ if __name__ == "__main__":
         help=(
             "Resume an interrupted run from this directory. "
             "The script loads frame_*.png and resume_state_<args_slug>.json. "
-            "When resuming, --max-seconds is treated as additional duration."
+            "When resuming, --max-seconds is treated as additional duration and "
+            "argument changes are allowed (reported as warnings)."
         ),
     )
     args = parser.parse_args()
