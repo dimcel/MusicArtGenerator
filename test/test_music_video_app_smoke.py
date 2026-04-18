@@ -101,7 +101,9 @@ def test_runner_smoke_with_mocked_dependencies(tmp_path, monkeypatch):
         use_controlnet=False,
     )
 
-    out_dir = tmp_path / "real_music_feature_video_song_full_4f"
+    output_dirs = sorted(tmp_path.glob("output_full_*"))
+    assert len(output_dirs) == 1
+    out_dir = output_dirs[0]
     assert out_dir.exists()
 
     frame_files = sorted(out_dir.glob("frame_*.png"))
@@ -117,5 +119,14 @@ def test_runner_smoke_with_mocked_dependencies(tmp_path, monkeypatch):
     state = json.loads(state_files[0].read_text(encoding="utf-8"))
     assert state["last_completed_frame"] == 3
 
-    video_path = out_dir / "real_music_feature_video_full_4f.mp4"
+    base_name = out_dir.name
+    video_path = out_dir / f"{base_name}.mp4"
     assert video_path.exists()
+
+    manifest_path = out_dir / f"{base_name}.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["output_base_name"] == base_name
+    assert manifest["run_status"] == "completed"
+    assert manifest["video_exists"] is True
+    assert manifest["args_slug"] == state["args_slug"]
