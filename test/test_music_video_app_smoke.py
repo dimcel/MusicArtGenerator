@@ -105,6 +105,7 @@ def test_runner_smoke_with_mocked_dependencies(tmp_path, monkeypatch):
     assert len(output_dirs) == 1
     out_dir = output_dirs[0]
     assert out_dir.exists()
+    assert "_4f_" in out_dir.name
 
     frame_files = sorted(out_dir.glob("frame_*.png"))
     assert [p.name for p in frame_files] == [

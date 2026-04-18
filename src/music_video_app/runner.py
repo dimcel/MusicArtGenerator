@@ -57,9 +57,10 @@ except ModuleNotFoundError:
     ImageGenerator = None
 
 
-def _build_output_base_name(mode: str) -> str:
+def _build_output_base_name(mode: str, total_frames: int) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"output_{mode}_{timestamp}"
+    frames_tag = f"{int(total_frames)}f"
+    return f"output_{mode}_{timestamp}_{frames_tag}"
 
 
 def _ensure_unique_dir_name(base_name: str) -> str:
@@ -271,9 +272,15 @@ def run(
     run_started_at = datetime.now().isoformat(timespec="seconds")
     if resume_dir:
         output_dir = Path(resume_dir)
-        output_base_name = output_dir.name or output_dir.resolve().name or _build_output_base_name(mode)
+        output_base_name = (
+            output_dir.name
+            or output_dir.resolve().name
+            or _build_output_base_name(mode=mode, total_frames=total_frames)
+        )
     else:
-        output_base_name = _ensure_unique_dir_name(_build_output_base_name(mode))
+        output_base_name = _ensure_unique_dir_name(
+            _build_output_base_name(mode=mode, total_frames=total_frames)
+        )
         output_dir = Path(output_base_name)
     output_dir.mkdir(exist_ok=True)
     resume_state_file = _state_path(output_dir, args_slug)
