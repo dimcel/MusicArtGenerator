@@ -72,6 +72,19 @@ def _ensure_unique_dir_name(base_name: str) -> str:
     return candidate
 
 
+def _ensure_unique_output_base_name(output_dir: Path, base_name: str) -> str:
+    candidate = base_name
+    suffix = 1
+    while (
+        (output_dir / f"{candidate}.mp4").exists()
+        or (output_dir / f"{candidate}_with_audio.mp4").exists()
+        or (output_dir / f"{candidate}.json").exists()
+    ):
+        candidate = f"{base_name}_{suffix:02d}"
+        suffix += 1
+    return candidate
+
+
 def _save_run_manifest(path: Path, payload: dict):
     tmp = path.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
@@ -272,11 +285,6 @@ def run(
     run_started_at = datetime.now().isoformat(timespec="seconds")
     if resume_dir:
         output_dir = Path(resume_dir)
-        output_base_name = (
-            output_dir.name
-            or output_dir.resolve().name
-            or _build_output_base_name(mode=mode, total_frames=total_frames)
-        )
     else:
         output_base_name = _ensure_unique_dir_name(
             _build_output_base_name(mode=mode, total_frames=total_frames)
@@ -284,7 +292,6 @@ def run(
         output_dir = Path(output_base_name)
     output_dir.mkdir(exist_ok=True)
     resume_state_file = _state_path(output_dir, args_slug)
-    run_manifest_file = output_dir / f"{output_base_name}.json"
 
     print(f"Audio: {audio_path}")
     print(
@@ -371,7 +378,6 @@ def run(
     elif str(user_prompt).strip():
         print(f"User prompt: {prompt_candidates[0]}")
     print(f"Output: {output_dir}/")
-    print(f"Run manifest: {run_manifest_file.name}")
     print(f"Resume state: {resume_state_file.name}")
 
     if Image is None:
@@ -448,6 +454,12 @@ def run(
                         "continuing with new values."
                     )
                     print(f"Changed args ({len(changed_keys)}): {', '.join(changed_keys)}")
+            saved_fps = loaded.get("fps")
+            if saved_fps is not None and int(saved_fps) != int(fps):
+                print(
+                    "Resume note: state was created with "
+                    f"{int(saved_fps)}fps but this run uses {int(fps)}fps."
+                )
             last_frame = int(loaded.get("last_completed_frame", -1))
             frame_path = output_dir / f"frame_{last_frame:05d}.png"
             if not frame_path.exists():
@@ -526,8 +538,21 @@ def run(
             print("No resume state found. Starting from frame 0.")
     print(f"Generation target: {total_frames / fps:.2f}s ({total_frames} frames @ {fps}fps)")
 
+    if resume_dir:
+        output_base_name = _ensure_unique_output_base_name(
+            output_dir,
+            _build_output_base_name(mode=mode, total_frames=total_frames),
+        )
+    else:
+        output_base_name = output_dir.name or _build_output_base_name(
+            mode=mode, total_frames=total_frames
+        )
+
+    run_manifest_file = output_dir / f"{output_base_name}.json"
     video_path = output_dir / f"{output_base_name}.mp4"
     muxed_path = output_dir / f"{output_base_name}_with_audio.mp4"
+    print(f"Export base: {output_base_name}")
+    print(f"Run manifest: {run_manifest_file.name}")
 
     _save_run_manifest(
         run_manifest_file,

@@ -1,6 +1,7 @@
 import json
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -131,3 +132,65 @@ def test_runner_smoke_with_mocked_dependencies(tmp_path, monkeypatch):
     assert manifest["run_status"] == "completed"
     assert manifest["video_exists"] is True
     assert manifest["args_slug"] == state["args_slug"]
+
+
+def test_resume_run_creates_new_export_and_uses_current_fps(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    export_calls = []
+
+    def _fake_frames_to_video(frames_dir, output_path, fps):
+        export_calls.append(
+            {
+                "frames_dir": Path(frames_dir),
+                "output_path": Path(output_path),
+                "fps": int(fps),
+            }
+        )
+        with open(output_path, "wb") as f:
+            f.write(b"fake-video")
+
+    fake_frames_mod = types.SimpleNamespace(frames_to_video=_fake_frames_to_video)
+    monkeypatch.setitem(sys.modules, "frames_to_video", fake_frames_mod)
+
+    monkeypatch.setattr(runner, "AudioFeatureExtractor", _FakeExtractor)
+    monkeypatch.setattr(runner, "ImageGenerator", _FakeGenerator)
+    monkeypatch.setattr(runner, "ImageGenerationConfig", _FakeImageGenerationConfig)
+    monkeypatch.setattr(runner, "CadenceCoherence", _FakeCoherence)
+    monkeypatch.setattr(runner, "transform_image", lambda image, **kwargs: image.copy())
+    monkeypatch.setattr(runner, "add_gaussian_noise", lambda image, amount, seed: image.copy())
+
+    runner.run(
+        audio_path="song.wav",
+        fps=4,
+        max_seconds=1.0,
+        with_audio=False,
+        use_controlnet=False,
+    )
+
+    output_dirs = sorted(tmp_path.glob("output_full_*"))
+    assert len(output_dirs) == 1
+    out_dir = output_dirs[0]
+    first_video = out_dir / f"{out_dir.name}.mp4"
+    assert first_video.exists()
+
+    runner.run(
+        audio_path="song.wav",
+        fps=6,
+        max_seconds=1.0,
+        with_audio=False,
+        use_controlnet=False,
+        resume_dir=str(out_dir),
+    )
+
+    mp4_files = sorted(out_dir.glob("*.mp4"))
+    assert len(mp4_files) == 2
+    assert first_video in mp4_files
+    second_video = [p for p in mp4_files if p != first_video][0]
+    assert "_6f" in second_video.stem
+
+    assert [call["fps"] for call in export_calls] == [4, 6]
+    assert export_calls[0]["output_path"] == first_video
+    assert export_calls[1]["output_path"] == second_video
+
+    manifest_files = sorted(out_dir.glob("output_full_*.json"))
+    assert len(manifest_files) == 2
