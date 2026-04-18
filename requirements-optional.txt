@@ -1,0 +1,6 @@
+# Optional extras for non-default paths / performance tweaks.
+# Install only if you need these features.
+
+tensorflow>=2.15
+tensorflow-hub>=0.16
+xformers>=0.0.27

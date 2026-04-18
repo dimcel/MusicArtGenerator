@@ -1,0 +1,13 @@
+# Temporary runtime baseline dependencies for music_video_app.
+# Keep versions loose for easier environment adaptation.
+
+numpy>=1.24
+Pillow>=10.0
+opencv-python>=4.8
+librosa>=0.10
+soundfile>=0.12
+torch>=2.2
+diffusers>=0.30
+transformers>=4.40
+accelerate>=0.30
+safetensors>=0.4
