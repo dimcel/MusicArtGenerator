@@ -1,6 +1,8 @@
 """Main generation runtime for the music-reactive video app."""
 
+import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -53,6 +55,27 @@ try:
 except ModuleNotFoundError:
     ImageGenerationConfig = None
     ImageGenerator = None
+
+
+def _build_output_base_name(mode: str) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"output_{mode}_{timestamp}"
+
+
+def _ensure_unique_dir_name(base_name: str) -> str:
+    candidate = base_name
+    suffix = 1
+    while Path(candidate).exists():
+        candidate = f"{base_name}_{suffix:02d}"
+        suffix += 1
+    return candidate
+
+
+def _save_run_manifest(path: Path, payload: dict):
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+    tmp.replace(path)
 
 
 def run(
@@ -245,13 +268,16 @@ def run(
     lock_identity = bool(init_image) and concept_mode == "identity"
     width, height = 512, 512
 
+    run_started_at = datetime.now().isoformat(timespec="seconds")
     if resume_dir:
         output_dir = Path(resume_dir)
+        output_base_name = output_dir.name or output_dir.resolve().name or _build_output_base_name(mode)
     else:
-        safe_name = Path(audio_path).stem.replace(" ", "_")
-        output_dir = Path(f"real_music_feature_video_{safe_name}_{mode}_{total_frames}f")
+        output_base_name = _ensure_unique_dir_name(_build_output_base_name(mode))
+        output_dir = Path(output_base_name)
     output_dir.mkdir(exist_ok=True)
     resume_state_file = _state_path(output_dir, args_slug)
+    run_manifest_file = output_dir / f"{output_base_name}.json"
 
     print(f"Audio: {audio_path}")
     print(
@@ -338,6 +364,7 @@ def run(
     elif str(user_prompt).strip():
         print(f"User prompt: {prompt_candidates[0]}")
     print(f"Output: {output_dir}/")
+    print(f"Run manifest: {run_manifest_file.name}")
     print(f"Resume state: {resume_state_file.name}")
 
     if Image is None:
@@ -491,6 +518,34 @@ def run(
                 )
             print("No resume state found. Starting from frame 0.")
     print(f"Generation target: {total_frames / fps:.2f}s ({total_frames} frames @ {fps}fps)")
+
+    video_path = output_dir / f"{output_base_name}.mp4"
+    muxed_path = output_dir / f"{output_base_name}_with_audio.mp4"
+
+    _save_run_manifest(
+        run_manifest_file,
+        {
+            "schema_version": 1,
+            "output_base_name": output_base_name,
+            "output_dir": str(output_dir),
+            "run_started_at": run_started_at,
+            "last_updated_at": datetime.now().isoformat(timespec="seconds"),
+            "run_status": "running",
+            "args_slug": args_slug,
+            "audio_path": str(audio_path),
+            "fps": int(fps),
+            "mode": str(mode),
+            "requested_frames": int(requested_frames),
+            "target_total_frames": int(total_frames),
+            "start_frame": int(start_frame),
+            "resume_enabled": bool(resume_dir),
+            "resume_state_file": str(resume_state_file),
+            "run_args": run_args,
+            "cli_args": cli_args or [],
+            "video_path": str(video_path),
+            "video_with_audio_path": str(muxed_path) if with_audio else None,
+        },
+    )
 
     if start_frame == 0:
         if init_image:
@@ -820,12 +875,10 @@ def run(
 
     from frames_to_video import frames_to_video
 
-    video_path = output_dir / f"real_music_feature_video_{mode}_{total_frames}f.mp4"
     frames_to_video(str(output_dir), str(video_path), fps=fps)
     print(f"Video: {video_path}")
 
     if with_audio:
-        muxed_path = output_dir / f"real_music_feature_video_{mode}_{total_frames}f_with_audio.mp4"
         cmd = (
             f'ffmpeg -y -i "{video_path}" -i "{audio_path}" '
             f'-c:v copy -c:a aac -shortest "{muxed_path}"'
@@ -834,3 +887,29 @@ def run(
             print(f"Muxed: {muxed_path}")
         else:
             print("ffmpeg mux failed; silent video is still saved.")
+
+    _save_run_manifest(
+        run_manifest_file,
+        {
+            "schema_version": 1,
+            "output_base_name": output_base_name,
+            "output_dir": str(output_dir),
+            "run_started_at": run_started_at,
+            "last_updated_at": datetime.now().isoformat(timespec="seconds"),
+            "run_status": "completed",
+            "args_slug": args_slug,
+            "audio_path": str(audio_path),
+            "fps": int(fps),
+            "mode": str(mode),
+            "requested_frames": int(requested_frames),
+            "target_total_frames": int(total_frames),
+            "resume_enabled": bool(resume_dir),
+            "resume_state_file": str(resume_state_file),
+            "run_args": run_args,
+            "cli_args": cli_args or [],
+            "video_path": str(video_path),
+            "video_exists": bool(video_path.exists()),
+            "video_with_audio_path": str(muxed_path) if with_audio else None,
+            "video_with_audio_exists": bool(muxed_path.exists()) if with_audio else False,
+        },
+    )
