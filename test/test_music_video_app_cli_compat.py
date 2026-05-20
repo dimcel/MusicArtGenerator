@@ -6,6 +6,7 @@ from src.music_video_app.cli import build_parser
 EXPECTED_FLAGS = {
     "--audio",
     "--fps",
+    "--device",
     "--mode",
     "--cadence",
     "--prompt",
@@ -69,6 +70,7 @@ def test_cli_defaults_and_types_match_legacy_behavior():
 
     assert args.audio == "song.wav"
     assert args.fps == 24 and isinstance(args.fps, int)
+    assert args.device == "auto"
     assert args.mode == "full"
     assert args.cadence == 3
     assert args.prompt == ""

@@ -93,6 +93,10 @@ python -m src.music_video_app \
 - `--canny-low`, `--canny-high`
 - `--control-scale-base`, `--control-scale-beat-boost`, `--control-scale-onset-boost`
 
+### Runtime
+
+- `--device` (`auto`, `cpu`, `mps`, `cuda`, `cuda:<index>`)
+
 ### Resume
 
 - `--resume-dir`

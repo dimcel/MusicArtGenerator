@@ -95,6 +95,7 @@ def _save_run_manifest(path: Path, payload: dict):
 def run(
     audio_path: str,
     fps: int = 24,
+    device: str = "auto",
     mode: str = "full",
     cadence: int = 3,
     prompt_mode: str = "blend",
@@ -236,6 +237,7 @@ def run(
     run_args = _build_run_args(
         audio_path=audio_path,
         fps=fps,
+        device=device,
         mode=mode,
         cadence=cadence,
         prompt_mode=prompt_mode,
@@ -299,6 +301,7 @@ def run(
         f"({requested_frames} frames @ {fps}fps)"
     )
     print(f"BPM: {features.bpm:.1f}, beats: {len(features.beat_frames)}")
+    print(f"Device: {device}")
     print(f"Mode: {mode}, cadence: {cadence}, prompt_mode: {prompt_mode}, coherence: {coherence}")
     print(
         f"ControlNet: {'ON' if use_controlnet else 'OFF'}"
@@ -393,6 +396,7 @@ def run(
         ImageGenerationConfig(
             width=width,
             height=height,
+            device=device,
             enable_controlnet=use_controlnet,
             controlnet_type="canny",
             controlnet_model_id=controlnet_model,
@@ -439,6 +443,7 @@ def run(
                     "steady_threshold",
                     "steady_shift_pixels",
                     "quiet_hold",
+                    "device",
                 ):
                     if k not in loaded_run_args_cmp and k in run_args:
                         loaded_run_args_cmp[k] = run_args[k]

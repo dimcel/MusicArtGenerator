@@ -30,7 +30,7 @@ class ImageGenerationConfig:
     # Model settings
     model_id: str = "SG161222/Realistic_Vision_V5.1_noVAE"
     vae_id: str = "stabilityai/sd-vae-ft-mse"
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = "auto"
 
     # ControlNet settings
     enable_controlnet: bool = False
@@ -78,12 +78,15 @@ class ImageGenerator:
             config: Configuration object (uses defaults if None)
         """
         self.config = config or ImageGenerationConfig()
+        requested_device = str(self.config.device or "auto")
+        self.config.device = self._resolve_device(requested_device)
         self._txt2img_pipe = None
         self._img2img_pipe = None
         self._controlnet_img2img_pipe = None
         self._warned_controlnet_family_mismatch = False
         
         print(f"🎨 Image Generator")
+        print(f"   Device request: {requested_device}")
         print(f"   Device: {self.config.device}")
         print(f"   Model: {self.config.model_id}")
         if self.config.enable_controlnet:
@@ -96,8 +99,58 @@ class ImageGenerator:
         else:
             self._load_img2img_pipeline()
 
+    @staticmethod
+    def _mps_available() -> bool:
+        backend = getattr(torch.backends, "mps", None)
+        return bool(backend is not None and backend.is_available())
+
+    def _resolve_device(self, requested_device: str) -> str:
+        requested = str(requested_device or "auto").strip().lower()
+        if requested == "auto":
+            if torch.cuda.is_available():
+                return "cuda"
+            if self._mps_available():
+                return "mps"
+            return "cpu"
+
+        if requested == "cpu":
+            return "cpu"
+
+        if requested == "mps":
+            if not self._mps_available():
+                raise ValueError(
+                    "Requested device 'mps' but MPS is not available in this PyTorch runtime."
+                )
+            return "mps"
+
+        if requested == "cuda" or requested.startswith("cuda:"):
+            if not torch.cuda.is_available():
+                raise ValueError(
+                    f"Requested device '{requested}' but CUDA is not available in this PyTorch runtime."
+                )
+            if requested.startswith("cuda:"):
+                try:
+                    gpu_index = int(requested.split(":", 1)[1])
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid CUDA device '{requested}'. Use 'cuda' or 'cuda:<index>' (for example cuda:0)."
+                    ) from exc
+                gpu_count = int(torch.cuda.device_count())
+                if gpu_index < 0 or gpu_index >= gpu_count:
+                    raise ValueError(
+                        f"Requested CUDA device index {gpu_index}, but only {gpu_count} device(s) are visible."
+                    )
+            return requested
+
+        raise ValueError(
+            f"Unsupported device '{requested}'. Use one of: auto, cpu, mps, cuda, cuda:<index>."
+        )
+
+    def _device_type(self) -> str:
+        return torch.device(self.config.device).type
+
     def _torch_dtype(self):
-        return torch.float16 if self.config.device == "cuda" else torch.float32
+        return torch.float16 if self._device_type() == "cuda" else torch.float32
 
     def _load_vae(self):
         return AutoencoderKL.from_pretrained(
@@ -106,13 +159,23 @@ class ImageGenerator:
         )
 
     def _optimize_pipeline(self, pipe):
-        if self.config.device != "cuda":
+        if self._device_type() != "cuda":
             return
         pipe.enable_attention_slicing()
         try:
             pipe.enable_xformers_memory_efficient_attention()
         except Exception:
             pass
+
+    def _make_generator(self, seed: Optional[int]):
+        if seed is None:
+            return None
+        try:
+            return torch.Generator(device=self.config.device).manual_seed(seed)
+        except RuntimeError:
+            # Some runtimes (for example MPS on several torch versions)
+            # do not support explicit per-device generators.
+            return torch.Generator(device="cpu").manual_seed(seed)
 
     @staticmethod
     def _infer_model_family(model_id: str) -> str:
@@ -256,9 +319,7 @@ class ImageGenerator:
         num_inference_steps = num_inference_steps or self.config.num_inference_steps
         
         # Create generator for seed
-        generator = None
-        if seed is not None:
-            generator = torch.Generator(device=self.config.device).manual_seed(seed)
+        generator = self._make_generator(seed)
         
         # Generate image
         result = self._txt2img_pipe(
@@ -308,9 +369,7 @@ class ImageGenerator:
         num_inference_steps = num_inference_steps or self.config.num_inference_steps
         
         # Create generator for seed
-        generator = None
-        if seed is not None:
-            generator = torch.Generator(device=self.config.device).manual_seed(seed)
+        generator = self._make_generator(seed)
 
         if self.config.enable_controlnet:
             if control_image is None:

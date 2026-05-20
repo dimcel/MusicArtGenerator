@@ -105,6 +105,7 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 |---|---|---:|---|---|---|
 | `--audio` | `str` | required | - | Input audio file path. | `--audio "track.wav"` |
 | `--fps` | `int` | `24` | - | Frames per second used for feature alignment and render pacing. | `--fps 30` |
+| `--device` | `str` | `auto` | `auto`, `cpu`, `mps`, `cuda`, `cuda:<index>` | Compute device for diffusion pipelines. `auto` prefers CUDA, then MPS, then CPU. | `--device cuda:0` |
 | `--max-seconds` | `float` | `12.0` | - | Without resume: clip from start. With resume: append duration. `<=0` means full audio. | `--max-seconds 20` |
 | `--with-audio` | flag | `False` | - | Mux original audio into final MP4 using ffmpeg. | `--with-audio` |
 | `--resume-dir` | `str` | `None` | - | Resume from an existing output directory/state. | `--resume-dir real_music_feature_video_song_cadence_480f` |

@@ -9,6 +9,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", type=str, required=True, help="Path to audio file (mp3/wav/etc.)")
     parser.add_argument("--fps", type=int, default=24)
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Compute device for diffusion pipelines (auto, cpu, mps, cuda, cuda:<index>).",
+    )
     parser.add_argument("--mode", choices=["full", "cadence"], default="full")
     parser.add_argument("--cadence", type=int, default=3)
     parser.add_argument(
@@ -207,6 +213,7 @@ def main(argv: Optional[list] = None):
     run(
         audio_path=args.audio,
         fps=args.fps,
+        device=args.device,
         mode=args.mode,
         cadence=args.cadence,
         user_prompt=args.prompt,

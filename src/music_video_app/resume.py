@@ -18,6 +18,7 @@ def _sanitize_label(value) -> str:
 def _build_run_args(
     audio_path: str,
     fps: int,
+    device: str,
     mode: str,
     cadence: int,
     prompt_mode: str,
@@ -68,6 +69,7 @@ def _build_run_args(
     return {
         "audio_path": str(audio_path),
         "fps": int(fps),
+        "device": str(device),
         "mode": str(mode),
         "cadence": int(cadence),
         "prompt_mode": str(prompt_mode),
