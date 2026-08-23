@@ -1,4 +1,4 @@
-# music_video_app
+# Music Video App CLI Reference
 
 `music_video_app` is the package-level runner for the music-reactive video pipeline.
 
@@ -28,7 +28,9 @@ python test/test_real_music_feature_video.py --audio "your_audio.wav" ...
 
 ## Installation
 
-> Temporary dependency setup (until packaging metadata is formalized).
+This repository is not currently published as an installable Python package.
+For the main setup and first-run instructions, see the
+[project README](../../README.md).
 
 ### System prerequisite
 
@@ -66,20 +68,26 @@ uv pip install -r requirements-optional.txt
 pip install -r requirements-optional.txt
 ```
 
-## Usage Model
+For ready-to-run configurations, see the [examples guide](../../examples/README.md).
+
+## Runtime And Output
 
 ### Output directory and artifacts
 
-Without resume mode, output directory is:
+Without resume mode, the output directory follows this pattern:
 
-- `real_music_feature_video_<audio_stem>_<mode>_<frames>f/`
+- `output_<mode>_<timestamp>_<frames>f/`
 
 Inside it, you will get:
 
 - frame images: `frame_00000.png`, `frame_00001.png`, ...
 - resume state: `resume_state_<args_slug>.json`
-- silent video: `real_music_feature_video_<mode>_<frames>f.mp4`
-- audio-muxed video (if `--with-audio`): `..._with_audio.mp4`
+- run manifest: `output_<mode>_<timestamp>_<frames>f.json`
+- silent video: `output_<mode>_<timestamp>_<frames>f.mp4`
+- audio-muxed video when `--with-audio` is used: `..._with_audio.mp4`
+
+If a name already exists, a numeric suffix is added instead of overwriting the
+existing output.
 
 ### Resume behavior
 
@@ -89,6 +97,7 @@ When `--resume-dir` is provided:
 - if exact slug is missing, runner can pick the most advanced available state
 - `--max-seconds` is treated as **additional** duration to append
 - argument drift is allowed; changed args are reported in logs
+- a new manifest and video export are created inside the same output directory
 
 ## Known Current Behavior
 
@@ -108,7 +117,7 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 | `--device` | `str` | `auto` | `auto`, `cpu`, `mps`, `cuda`, `cuda:<index>` | Compute device for diffusion pipelines. `auto` prefers CUDA, then MPS, then CPU. | `--device cuda:0` |
 | `--max-seconds` | `float` | `12.0` | - | Without resume: clip from start. With resume: append duration. `<=0` means full audio. | `--max-seconds 20` |
 | `--with-audio` | flag | `False` | - | Mux original audio into final MP4 using ffmpeg. | `--with-audio` |
-| `--resume-dir` | `str` | `None` | - | Resume from an existing output directory/state. | `--resume-dir real_music_feature_video_song_cadence_480f` |
+| `--resume-dir` | `str` | `None` | - | Resume from an existing output directory/state. | `--resume-dir output_cadence_20260823_153000_480f` |
 
 ### 2) Generation Mode / Cadence / Coherence
 
@@ -125,7 +134,7 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 | `--prompt` | `str` | `""` | - | Main prompt. Supports single string, `||` list, or JSON list string. | `--prompt "scene A || scene B"` |
 | `--prompt-change-every-beats` | `int` | `1` | - | For prompt lists, switch prompt every N beat events. | `--prompt-change-every-beats 2` |
 | `--prompt-mode` | `str` | `blend` | `blend`, `hard` | Compatibility flag for prompt behavior mode selection. | `--prompt-mode hard` |
-| `--init-image` | `str` | `None` | - | Seed frame 0 from this image (resized to pipeline dimensions). | `--init-image "../afro.png"` |
+| `--init-image` | `str` | `None` | - | Seed frame 0 from this image (resized to pipeline dimensions). | `--init-image "starting_image.png"` |
 | `--concept-mode` | `str` | `identity` | `identity`, `transform` | How strongly to preserve init-image identity over time. | `--concept-mode transform` |
 | `--identity-prompt` | `str` | `""` | - | Extra identity anchor text appended when identity lock applies. | `--identity-prompt "same face and hairstyle"` |
 
@@ -177,53 +186,8 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 
 ## Example Presets
 
-### Twist
-
-```bash
-python -m src.music_video_app \
-  --audio "fake_debug_profile.wav" \
-  --init-image "../afro.png" \
-  --concept-mode transform \
-  --prompt "Herbie Hancock sci-fi landscape on space, Herbie Hancock keyboardist with afro hair inside a transparent spherical space cockpit, Herbie Hancock playing a futuristic synthesizer, Herbie Hancock floating above dense purple clouds, massive surreal mountain with geometric ancient city carved into it, dreamy and cosmic atmosphere, 1970s jazz album cover style, soft airbrushed textures, highly detailed, retro-futurism, warm magenta and violet color palette with purple highlights, cinematic lighting" \
-  --max-seconds 12 \
-  --controlnet \
-  --mode cadence \
-  --cadence 2 \
-  --coherence none \
-  --zoom-base 1.01 \
-  --zoom-beat-boost 0.00 \
-  --steady-activation-mode auto \
-  --steady-activation-ratio 1.0 \
-  --steady-shift-probability 0.9 \
-  --steady-twist \
-  --steady-twist-max-deg 4.0 \
-  --with-audio
-```
-
-### Twist + Shift
-
-```bash
-python -m src.music_video_app \
-  --audio "../afro.mp3" \
-  --init-image "../afro.png" \
-  --concept-mode transform \
-  --prompt "Herbie Hancock sci-fi landscape on space, Herbie Hancock keyboardist with afro hair inside a transparent spherical space cockpit, Herbie Hancock playing a futuristic synthesizer, Herbie Hancock floating above dense purple clouds, massive surreal mountain with geometric ancient city carved into it, dreamy and cosmic atmosphere, 1970s jazz album cover style, soft airbrushed textures, highly detailed, retro-futurism, warm magenta and violet color palette with purple highlights, cinematic lighting" \
-  --max-seconds 20 \
-  --controlnet \
-  --mode cadence \
-  --cadence 2 \
-  --coherence none \
-  --zoom-base 1.01 \
-  --zoom-beat-boost 0.00 \
-  --steady-shift \
-  --steady-shift-pixels 20 \
-  --steady-activation-mode auto \
-  --steady-activation-ratio 1.0 \
-  --steady-shift-probability 0.9 \
-  --steady-twist \
-  --steady-twist-max-deg 4.0 \
-  --with-audio
-```
+The [examples guide](../../examples/README.md) contains basic cadence, onset
+jitter, quiet hold, twist, prompt-list, ControlNet, and resume commands.
 
 ## Troubleshooting
 

@@ -1,157 +1,153 @@
 # MusicArtGenerator
 
-MusicArtGenerator creates music-reactive videos by turning an audio track into frame-by-frame visual controls (camera motion, prompt shifts, diffusion strength, optional ControlNet), then exporting an MP4 and optionally muxing audio.
+MusicArtGenerator turns music into an evolving visual sequence. It extracts
+frame-aligned features from an audio track, maps them to readable visual
+controls, and uses recurrent Stable Diffusion generation to create a
+music-reactive video.
 
-## Entrypoints
+[![MusicArtGenerator example](examples/assets/twist_preview.gif)](examples/assets/twist_preview.mp4)
 
-- Preferred package entrypoint: `python -m src.music_video_app ...`
-- Legacy-compatible entrypoint: `python test/test_real_music_feature_video.py ...`
+*Silent preview from a real generation. [Open the higher-quality MP4](examples/assets/twist_preview.mp4).*
 
-For the complete CLI reference (all arguments), see [`src/music_video_app/README.md`](src/music_video_app/README.md).
+## What It Does
 
-## Prerequisites
+- detects beats, onsets, energy, spectral brightness, and pitch
+- aligns every audio feature to the video frame timeline
+- maps music features to diffusion strength, CFG scale, noise, zoom, pan,
+  rotation, ControlNet scale, cadence, and prompt changes
+- starts from a text prompt or an optional initial image
+- supports cadence generation, quiet sections, onset jitter, steady movement,
+  twist, color coherence, and reference re-anchoring
+- saves every frame, a run manifest, and resume state for long generations
+- exports a silent MP4 and can add the original audio with `ffmpeg`
 
-- Python 3.10+
-- `ffmpeg` available in `PATH` (required for video export/audio mux)
+## How It Works
 
-Quick `ffmpeg` install examples:
-
-- macOS (Homebrew): `brew install ffmpeg`
-- Ubuntu/Debian: `sudo apt-get install ffmpeg`
-- Windows (winget): `winget install Gyan.FFmpeg`
-
-## Install Dependencies
-
-This repo currently uses **temporary requirements files**:
-
-- `requirements-temp.txt` -> runtime baseline
-- `requirements-optional.txt` -> optional extras (FILM/RIFE-related paths and perf extras)
-
-### Option A: `uv`
-
-```bash
-uv venv .venv
-source .venv/bin/activate
-uv pip install -r requirements-temp.txt
-# optional extras
-uv pip install -r requirements-optional.txt
+```mermaid
+flowchart LR
+    A[Audio track] --> B[Frame-aligned music features]
+    B --> C[Calibrated visual controls]
+    C --> D[Transform previous frame]
+    D --> E{Diffusion frame?}
+    E -->|Yes| F[Img2img and optional ControlNet]
+    E -->|No| G[Cadence coherence]
+    F --> H[Save next frame]
+    G --> H
+    H --> D
+    H --> I[MP4 and optional audio]
 ```
 
-### Option B: `pip`
+The controls stay outside the diffusion model. This makes the connection
+between the music and the visual changes easier to inspect and adjust.
+
+## Requirements
+
+- Python 3.10 or newer
+- `ffmpeg` available in `PATH`
+- a CUDA GPU is strongly recommended for practical generation time
+- internet access on the first run to download the pretrained models
+
+The default renderer uses
+[`SG161222/Realistic_Vision_V5.1_noVAE`](https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE).
+When ControlNet is enabled, the default is
+[`lllyasviel/sd-controlnet-canny`](https://huggingface.co/lllyasviel/sd-controlnet-canny).
+
+## Installation
 
 ```bash
+git clone https://github.com/dimcel/MusicArtGenerator.git
+cd MusicArtGenerator
+
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements-temp.txt
-# optional extras
-pip install -r requirements-optional.txt
 ```
 
-## Minimum Run
+On Windows, activate the environment with `.venv\Scripts\activate`.
 
-Minimum required + core controls:
+Install `ffmpeg` separately if needed:
 
-- `--audio`: input audio file
-- `--max-seconds`: generation duration cap
-- `--mode`: `full` or `cadence`
-- `--cadence`: cadence interval when in cadence mode
-- `--with-audio`: mux original audio into final MP4
+```bash
+# macOS
+brew install ffmpeg
 
-Example:
+# Ubuntu or Debian
+sudo apt-get install ffmpeg
+
+# Windows
+winget install Gyan.FFmpeg
+```
+
+Optional FILM, RIFE-related, and acceleration dependencies are listed in
+`requirements-optional.txt`.
+
+## Quick Start
+
+Run commands from the repository directory:
 
 ```bash
 python -m src.music_video_app \
-  --audio "fake_debug_profile.wav" \
-  --max-seconds 12 \
-  --mode cadence \
-  --cadence 2 \
-  --with-audio
-```
-
-## Most-Used Optional Args
-
-### Prompt / Init Image
-
-- `--prompt`
-- `--init-image`
-- `--concept-mode` (`identity` or `transform`)
-- `--identity-prompt`
-
-### Motion / Reactivity
-
-- `--zoom-base`, `--zoom-beat-boost`
-- `--steady-shift`, `--steady-shift-pixels`
-- `--steady-activation-mode`, `--steady-activation-ratio`, `--steady-shift-probability`
-- `--steady-twist`, `--steady-twist-max-deg`
-- `--quiet-hold`, `--onset-jitter`
-
-### ControlNet
-
-- `--controlnet`
-- `--controlnet-model`
-- `--canny-low`, `--canny-high`
-- `--control-scale-base`, `--control-scale-beat-boost`, `--control-scale-onset-boost`
-
-### Runtime
-
-- `--device` (`auto`, `cpu`, `mps`, `cuda`, `cuda:<index>`)
-
-### Resume
-
-- `--resume-dir`
-
-## Preset Example: Twist
-
-```bash
-python -m src.music_video_app \
-  --audio "fake_debug_profile.wav" \
-  --init-image "../afro.png" \
+  --audio "path/to/track.wav" \
+  --init-image "path/to/starting_image.png" \
   --concept-mode transform \
-  --prompt "Herbie Hancock sci-fi landscape on space, Herbie Hancock keyboardist with afro hair inside a transparent spherical space cockpit, Herbie Hancock playing a futuristic synthesizer, Herbie Hancock floating above dense purple clouds, massive surreal mountain with geometric ancient city carved into it, dreamy and cosmic atmosphere, 1970s jazz album cover style, soft airbrushed textures, highly detailed, retro-futurism, warm magenta and violet color palette with purple highlights, cinematic lighting" \
-  --max-seconds 12 \
-  --controlnet \
+  --prompt "a luminous landscape evolving through color and motion" \
+  --max-seconds 8 \
   --mode cadence \
   --cadence 2 \
-  --coherence none \
-  --zoom-base 1.01 \
-  --zoom-beat-boost 0.00 \
-  --steady-activation-mode auto \
-  --steady-activation-ratio 1.0 \
-  --steady-shift-probability 0.9 \
-  --steady-twist \
-  --steady-twist-max-deg 4.0 \
+  --controlnet \
+  --quiet-hold \
   --with-audio
 ```
 
-## Preset Example: Twist + Shift
+The first run can take longer because model files are downloaded. Start with a
+short value for `--max-seconds` before generating a complete track.
 
-```bash
-python -m src.music_video_app \
-  --audio "../afro.mp3" \
-  --init-image "../afro.png" \
-  --concept-mode transform \
-  --prompt "Herbie Hancock sci-fi landscape on space, Herbie Hancock keyboardist with afro hair inside a transparent spherical space cockpit, Herbie Hancock playing a futuristic synthesizer, Herbie Hancock floating above dense purple clouds, massive surreal mountain with geometric ancient city carved into it, dreamy and cosmic atmosphere, 1970s jazz album cover style, soft airbrushed textures, highly detailed, retro-futurism, warm magenta and violet color palette with purple highlights, cinematic lighting" \
-  --max-seconds 20 \
-  --controlnet \
-  --mode cadence \
-  --cadence 2 \
-  --coherence none \
-  --zoom-base 1.01 \
-  --zoom-beat-boost 0.00 \
-  --steady-shift \
-  --steady-shift-pixels 20 \
-  --steady-activation-mode auto \
-  --steady-activation-ratio 1.0 \
-  --steady-shift-probability 0.9 \
-  --steady-twist \
-  --steady-twist-max-deg 4.0 \
-  --with-audio
+## Output
+
+A new run creates a directory such as:
+
+```text
+output_cadence_20260823_153000_192f/
 ```
 
-## Sanity Checks
+It contains:
 
-```bash
-python -m src.music_video_app --help
-python test/test_real_music_feature_video.py --help
+```text
+frame_00000.png                         saved frame sequence
+frame_00001.png
+resume_state_<settings>.json            continuation state
+output_cadence_<timestamp>_192f.json    run settings and output manifest
+output_cadence_<timestamp>_192f.mp4     silent video
+output_cadence_<timestamp>_192f_with_audio.mp4
 ```
+
+Resume an interrupted or completed run with `--resume-dir`. In resume mode,
+`--max-seconds` means the additional duration to generate.
+
+## Documentation
+
+- [Examples and presets](examples/README.md)
+- [Complete command-line reference](src/music_video_app/README.md)
+- Inspect the available arguments with `python -m src.music_video_app --help`
+
+The preferred entrypoint is `python -m src.music_video_app`. The legacy
+`test/test_real_music_feature_video.py` wrapper remains available for
+compatibility.
+
+## Current Status
+
+MusicArtGenerator is a command-line research prototype developed for a thesis
+on music-reactive visual generation. Output is currently fixed at 512 by 512
+pixels, generation is computationally expensive, and results depend on the
+audio, prompt, initial image, selected controls, model, and hardware.
+
+`--prompt-mode` is retained for compatibility, but its strategy switch is not
+fully active. Subject-transition settings are saved in resume state, but they
+are not yet fully connected to prompt transitions.
+
+## Responsible Use
+
+Only use audio, images, prompts, and model weights that you have permission to
+use. Review the licenses and usage conditions of the selected diffusion and
+ControlNet models before publishing generated results.
