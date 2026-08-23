@@ -5,11 +5,11 @@ repository directory and replace the input paths and prompts with your own.
 
 ## Generated Example
 
-[![Twist and quiet-hold preview](assets/twist_preview.gif)](assets/twist_preview.mp4)
+[![Twist and quiet-hold preview](assets/twist_preview.gif)](assets/twist_preview_with_audio.mp4)
 
-This silent excerpt was produced by the current pipeline with cadence mode,
-ControlNet, quiet hold, music-reactive zoom, and onset-reactive twist. The
-commercial source audio is not included in this repository.
+This excerpt was produced by the current pipeline with cadence mode, ControlNet,
+quiet hold, music-reactive zoom, and onset-reactive twist. The GIF is silent.
+[Open the MP4 to watch the example with music](assets/twist_preview_with_audio.mp4).
 
 ## Basic Cadence Generation
 

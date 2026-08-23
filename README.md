@@ -5,9 +5,9 @@ frame-aligned features from an audio track, maps them to readable visual
 controls, and uses recurrent Stable Diffusion generation to create a
 music-reactive video.
 
-[![MusicArtGenerator example](examples/assets/twist_preview.gif)](examples/assets/twist_preview.mp4)
+[![MusicArtGenerator example](examples/assets/twist_preview.gif)](examples/assets/twist_preview_with_audio.mp4)
 
-*Silent preview from a real generation. [Open the higher-quality MP4](examples/assets/twist_preview.mp4).*
+*The animated preview is silent. [Open the MP4 to watch it with music](examples/assets/twist_preview_with_audio.mp4).*
 
 ## What It Does
 
