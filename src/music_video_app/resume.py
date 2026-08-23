@@ -6,9 +6,6 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 
-from src.prompt_blender import SubjectTransitionController
-
-
 def _sanitize_label(value) -> str:
     s = str(value).strip()
     s = re.sub(r"[^a-zA-Z0-9._-]+", "-", s)
@@ -23,9 +20,6 @@ def _build_run_args(
     cadence: int,
     prompt_mode: str,
     coherence: str,
-    subject_hold_frames: int,
-    subject_transition_frames: int,
-    subject_smoothing_window: int,
     max_seconds: float,
     use_controlnet: bool,
     controlnet_model: str,
@@ -37,8 +31,6 @@ def _build_run_args(
     canny_low: int,
     canny_high: int,
     init_image: Optional[str],
-    concept_mode: str,
-    identity_prompt: str,
     user_prompt: str,
     prompt_change_every_beats: int,
     music_color_fx: bool,
@@ -50,13 +42,6 @@ def _build_run_args(
     re_anchor_every_frames: int,
     disable_camera_motion: bool,
     disable_music_change: bool,
-    steady_shift: bool,
-    steady_activation_mode: str,
-    steady_activation_ratio: float,
-    steady_shift_probability: float,
-    steady_min_seconds: float,
-    steady_threshold: float,
-    steady_shift_pixels: float,
     steady_twist: bool,
     steady_twist_max_deg: float,
     quiet_hold: bool,
@@ -74,9 +59,6 @@ def _build_run_args(
         "cadence": int(cadence),
         "prompt_mode": str(prompt_mode),
         "coherence": str(coherence),
-        "subject_hold_frames": int(subject_hold_frames),
-        "subject_transition_frames": int(subject_transition_frames),
-        "subject_smoothing_window": int(subject_smoothing_window),
         "use_controlnet": bool(use_controlnet),
         "controlnet_model": str(controlnet_model),
         "control_scale_base": float(control_scale_base),
@@ -87,8 +69,6 @@ def _build_run_args(
         "canny_low": int(canny_low),
         "canny_high": int(canny_high),
         "init_image": init_image_abs,
-        "concept_mode": str(concept_mode),
-        "identity_prompt": str(identity_prompt),
         "user_prompt": str(user_prompt),
         "prompt_change_every_beats": int(prompt_change_every_beats),
         "music_color_fx": bool(music_color_fx),
@@ -100,13 +80,6 @@ def _build_run_args(
         "re_anchor_every_frames": int(re_anchor_every_frames),
         "disable_camera_motion": bool(disable_camera_motion),
         "disable_music_change": bool(disable_music_change),
-        "steady_shift": bool(steady_shift),
-        "steady_activation_mode": str(steady_activation_mode),
-        "steady_activation_ratio": float(steady_activation_ratio),
-        "steady_shift_probability": float(steady_shift_probability),
-        "steady_min_seconds": float(steady_min_seconds),
-        "steady_threshold": float(steady_threshold),
-        "steady_shift_pixels": float(steady_shift_pixels),
         "steady_twist": bool(steady_twist),
         "steady_twist_max_deg": float(steady_twist_max_deg),
         "quiet_hold": bool(quiet_hold),
@@ -130,39 +103,12 @@ def _state_path(output_dir: Path, args_slug: str) -> Path:
     return output_dir / f"resume_state_{args_slug}.json"
 
 
-def _controller_to_dict(controller: SubjectTransitionController) -> Dict[str, object]:
-    return {
-        "initialized": bool(controller.initialized),
-        "current_idx": int(controller.current_idx),
-        "target_idx": int(controller.target_idx),
-        "prev_idx": int(controller.prev_idx),
-        "hold_until": int(controller.hold_until),
-        "in_transition": bool(controller.in_transition),
-        "transition_start": int(controller.transition_start),
-    }
-
-
-def _controller_from_dict(controller: SubjectTransitionController, state: Dict[str, object]):
-    for name in (
-        "initialized",
-        "current_idx",
-        "target_idx",
-        "prev_idx",
-        "hold_until",
-        "in_transition",
-        "transition_start",
-    ):
-        if name in state:
-            setattr(controller, name, state[name])
-
-
 def _save_resume_state(
     state_file: Path,
     run_args: Dict[str, object],
     args_slug: str,
     last_completed_frame: int,
     seed_state: float,
-    subject_controller: SubjectTransitionController,
     total_frames: int,
     fps: int,
     prompt_state: Optional[Dict[str, int]],
@@ -175,7 +121,6 @@ def _save_resume_state(
         "cli_args": cli_args or [],
         "last_completed_frame": int(last_completed_frame),
         "seed_state": float(seed_state),
-        "subject_controller": _controller_to_dict(subject_controller),
         "prompt_state": prompt_state or {},
         "total_frames": int(total_frames),
         "fps": int(fps),

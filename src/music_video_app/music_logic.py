@@ -32,15 +32,6 @@ def _load_and_resize_init_image(path: str, width: int, height: int) -> Image.Ima
     return image
 
 
-def _apply_identity_anchor(prompt: str, lock_identity: bool, identity_prompt: str) -> str:
-    if not lock_identity:
-        return prompt
-    anchor = str(identity_prompt or "").strip()
-    if not anchor:
-        return prompt
-    return f"{prompt}. Keep the same main subject identity: {anchor}."
-
-
 def _parse_prompt_candidates(user_prompt: str):
     """
     Parse user prompt input as:

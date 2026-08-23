@@ -32,7 +32,6 @@ between diffusion updates use the selected coherence method.
 python -m src.music_video_app \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
-  --concept-mode transform \
   --prompt "a surreal night landscape with glowing geometric forms" \
   --max-seconds 12 \
   --mode cadence \
@@ -53,7 +52,6 @@ sections.
 python -m src.music_video_app \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
-  --concept-mode transform \
   --prompt "a cosmic landscape with soft purple light and distant planets" \
   --max-seconds 12 \
   --mode cadence \
@@ -77,7 +75,6 @@ onsets. Quiet hold calms both effects in lower-activity sections.
 python -m src.music_video_app \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
-  --concept-mode transform \
   --prompt "glowing forest at night || crystalline city at dawn || clouds above a violet ocean" \
   --prompt-change-every-beats 4 \
   --max-seconds 12 \

@@ -22,28 +22,20 @@ from src.music_feature_mapper import (
     calibrate_feature_curve,
     map_frame_to_controls,
 )
-from src.prompt_blender import SubjectTransitionController
-
 from .music_logic import (
-    _apply_identity_anchor,
     _apply_music_color_fx,
     _apply_onset_jitter_controls,
-    _build_auto_steady_activation_mask,
     _build_onset_twist_gain,
     _build_quiet_hold_mask,
     _build_soft_run_gain,
-    _build_stability_curve,
-    _build_stable_run_lengths,
     _load_and_resize_init_image,
     _parse_prompt_candidates,
     _re_anchor_profile,
-    _steady_direction_from_features,
 )
 from .resume import (
     _build_args_slug,
     _build_run_args,
     _changed_run_arg_keys,
-    _controller_from_dict,
     _find_last_frame,
     _load_resume_state,
     _save_resume_state,
@@ -100,9 +92,6 @@ def run(
     cadence: int = 3,
     prompt_mode: str = "blend",
     coherence: str = "blend",
-    subject_hold_frames: int = 32,
-    subject_transition_frames: int = 16,
-    subject_smoothing_window: int = 41,
     max_seconds: float = 12.0,
     with_audio: bool = True,
     use_controlnet: bool = False,
@@ -115,8 +104,6 @@ def run(
     canny_low: int = 100,
     canny_high: int = 200,
     init_image: Optional[str] = None,
-    concept_mode: str = "identity",
-    identity_prompt: str = "",
     user_prompt: str = "",
     prompt_change_every_beats: int = 1,
     music_color_fx: bool = False,
@@ -128,13 +115,6 @@ def run(
     re_anchor_every_frames: int = 12,
     disable_camera_motion: bool = False,
     disable_music_change: bool = False,
-    steady_shift: bool = False,
-    steady_activation_mode: str = "auto",
-    steady_activation_ratio: float = 1.0,
-    steady_shift_probability: float = 1.0,
-    steady_min_seconds: float = 1.0,
-    steady_threshold: float = 0.72,
-    steady_shift_pixels: float = 6.0,
     steady_twist: bool = False,
     steady_twist_max_deg: float = 4.0,
     quiet_hold: bool = False,
@@ -187,33 +167,7 @@ def run(
     # It is not currently switching prompt-construction strategies in the frame loop.
     prompt_reactive_enabled = len(prompt_candidates) > 1 and (not disable_music_change)
 
-    steady_activation_mode = str(steady_activation_mode or "auto").strip().lower()
-    if steady_activation_mode not in ("auto", "manual"):
-        raise ValueError("steady_activation_mode must be 'auto' or 'manual'")
-
-    steady_activation_ratio = max(0.0, min(1.0, float(steady_activation_ratio)))
-    steady_shift_probability = max(0.0, min(1.0, float(steady_shift_probability)))
-    steady_threshold = max(0.0, min(1.0, float(steady_threshold)))
-    steady_shift_pixels = abs(float(steady_shift_pixels))
     steady_twist_max_deg = abs(float(steady_twist_max_deg))
-    steady_min_frames = max(1, int(round(max(0.05, float(steady_min_seconds)) * fps)))
-    stability_curve = _build_stability_curve(onset_curve, pitch_curve, bright_curve)
-
-    stable_run_lengths = None
-    steady_active_mask = None
-    steady_auto_meta = None
-    if steady_activation_mode == "manual":
-        stable_run_lengths = _build_stable_run_lengths(stability_curve, threshold=steady_threshold)
-    else:
-        steady_active_mask, steady_auto_meta = _build_auto_steady_activation_mask(
-            stability_curve=stability_curve,
-            energy_curve=energy_curve,
-            onset_curve=onset_curve,
-            beat_frames=features.beat_frames,
-            fps=fps,
-            activation_ratio=steady_activation_ratio,
-            shift_probability=steady_shift_probability,
-        )
     quiet_hold_mask = None
     quiet_hold_gain = None
     quiet_hold_meta = None
@@ -242,9 +196,6 @@ def run(
         cadence=cadence,
         prompt_mode=prompt_mode,
         coherence=coherence,
-        subject_hold_frames=subject_hold_frames,
-        subject_transition_frames=subject_transition_frames,
-        subject_smoothing_window=subject_smoothing_window,
         max_seconds=max_seconds,
         use_controlnet=use_controlnet,
         controlnet_model=controlnet_model,
@@ -256,8 +207,6 @@ def run(
         canny_low=canny_low,
         canny_high=canny_high,
         init_image=init_image,
-        concept_mode=concept_mode,
-        identity_prompt=identity_prompt,
         user_prompt=user_prompt,
         prompt_change_every_beats=prompt_change_every_beats,
         music_color_fx=music_color_fx,
@@ -269,19 +218,11 @@ def run(
         re_anchor_every_frames=re_anchor_every_frames,
         disable_camera_motion=disable_camera_motion,
         disable_music_change=disable_music_change,
-        steady_shift=steady_shift,
-        steady_activation_mode=steady_activation_mode,
-        steady_activation_ratio=steady_activation_ratio,
-        steady_shift_probability=steady_shift_probability,
-        steady_min_seconds=steady_min_seconds,
-        steady_threshold=steady_threshold,
-        steady_shift_pixels=steady_shift_pixels,
         steady_twist=steady_twist,
         steady_twist_max_deg=steady_twist_max_deg,
         quiet_hold=quiet_hold,
     )
     args_slug = _build_args_slug(run_args)
-    lock_identity = bool(init_image) and concept_mode == "identity"
     width, height = 512, 512
 
     run_started_at = datetime.now().isoformat(timespec="seconds")
@@ -312,7 +253,7 @@ def run(
         )
     )
     if init_image:
-        print(f"Init image: {init_image} (concept_mode={concept_mode})")
+        print(f"Init image: {init_image}")
     else:
         print("Init image: OFF")
     print(f"Music color FX: {'ON' if music_color_fx else 'OFF'}")
@@ -334,29 +275,6 @@ def run(
         f"Re-anchor: {'ON' if re_anchor else 'OFF'} "
         f"(strength={re_anchor_strength}, every={max(1, int(re_anchor_every_frames))}f)"
     )
-    if steady_shift:
-        if steady_activation_mode == "auto" and steady_auto_meta is not None:
-            print(
-                "Steady shift: ON "
-                f"(mode=auto, run_ratio={steady_auto_meta['activation_ratio']:.2f}, "
-                f"run_prob={steady_auto_meta['shift_probability']:.2f}, "
-                f"eligible_runs={steady_auto_meta['eligible_runs']}, "
-                f"active_runs={steady_auto_meta['active_runs']}, "
-                f"eligible_f={steady_auto_meta['eligible_frame_ratio']:.2f}, "
-                f"active_f={steady_auto_meta['actual_frame_ratio']:.2f}, "
-                f"sth={steady_auto_meta['stable_threshold']:.2f}, "
-                f"eg={steady_auto_meta['energy_gate']:.2f}, "
-                f"min_run={steady_auto_meta['min_run_frames']}f, "
-                f"px={steady_shift_pixels:.2f})"
-            )
-        else:
-            print(
-                "Steady shift: ON "
-                f"(mode=manual, min={steady_min_seconds:.2f}s/{steady_min_frames}f, "
-                f"thr={steady_threshold:.2f}, px={steady_shift_pixels:.2f})"
-            )
-    else:
-        print("Steady shift: OFF")
     if steady_twist:
         if twist_onset_meta is not None:
             print(
@@ -403,13 +321,6 @@ def run(
         )
     )
     coherence_helper = CadenceCoherence(method=coherence, blend_alpha=0.35)
-    # TODO(phase-2): subject transition controller state is persisted for backward
-    # compatibility, but transition stepping is currently not wired into prompts.
-    subject_controller = SubjectTransitionController(
-        num_subjects=4,
-        hold_frames=subject_hold_frames,
-        transition_frames=subject_transition_frames,
-    )
     seed_state = 42.0
     re_anchor_every = max(1, int(re_anchor_every_frames))
     re_anchor_alpha, re_anchor_strength_cap, re_anchor_noise_cap, re_anchor_control_min = _re_anchor_profile(
@@ -428,25 +339,6 @@ def run(
             loaded_run_args = loaded.get("run_args")
             if loaded_run_args:
                 loaded_run_args_cmp = dict(loaded_run_args)
-                # Backward compatibility with resume states created
-                # before steady-shift options existed.
-                for k in (
-                    "steady_shift",
-                    "steady_twist",
-                    "steady_twist_max_deg",
-                    "steady_activation_mode",
-                    "steady_activation_ratio",
-                    "steady_shift_probability",
-                    "music_color_fx",
-                    "onset_jitter",
-                    "steady_min_seconds",
-                    "steady_threshold",
-                    "steady_shift_pixels",
-                    "quiet_hold",
-                    "device",
-                ):
-                    if k not in loaded_run_args_cmp and k in run_args:
-                        loaded_run_args_cmp[k] = run_args[k]
                 loaded_run_args_cmp.pop("max_seconds", None)
             else:
                 loaded_run_args_cmp = None
@@ -500,10 +392,6 @@ def run(
                     f"(target {total_frames / fps:.2f}s total)"
                 )
             seed_state = float(loaded.get("seed_state", 42.0))
-            _controller_from_dict(
-                subject_controller,
-                loaded.get("subject_controller", {}),
-            )
             loaded_prompt_state = loaded.get("prompt_state", {})
             if isinstance(loaded_prompt_state, dict) and loaded_prompt_state:
                 active_prompt_idx = int(loaded_prompt_state.get("active_prompt_idx", 0))
@@ -599,7 +487,6 @@ def run(
             args_slug=args_slug,
             last_completed_frame=0,
             seed_state=seed_state,
-            subject_controller=subject_controller,
             total_frames=total_frames,
             fps=fps,
             prompt_state={
@@ -617,10 +504,6 @@ def run(
     if start_frame >= total_frames:
         print("All frames already generated; skipping frame generation.")
 
-    steady_prev_active = False
-    steady_dir_label = "none"
-    steady_dir_x = 0.0
-    steady_dir_y = 0.0
     steady_twist_deg = 0.0
 
     for frame in range(start_frame, total_frames):
@@ -694,41 +577,6 @@ def run(
                 min(float(mapper_cfg.noise_max), float(controls["noise_amount"])),
             )
 
-        steady_active = False
-        steady_direction = "none"
-        if steady_shift and not disable_music_change and not quiet_active:
-            if steady_activation_mode == "auto":
-                steady_active = bool(steady_active_mask[frame]) if steady_active_mask is not None else False
-            else:
-                steady_active = (
-                    bool(stable_run_lengths is not None)
-                    and int(stable_run_lengths[frame]) >= steady_min_frames
-                )
-
-            if steady_active:
-                stability_gain = float(stability_curve[frame])
-                if not steady_prev_active:
-                    steady_dir_label, steady_dir_x, steady_dir_y = _steady_direction_from_features(
-                        pitch=float(pitch_curve[frame]),
-                        brightness=float(bright_curve[frame]),
-                    )
-                steady_direction = steady_dir_label
-                shift_px = steady_shift_pixels * (0.65 + 0.55 * stability_gain)
-
-                controls["tx_delta"] = float(controls["tx_delta"] + steady_dir_x * shift_px)
-                controls["ty_delta"] = float(controls["ty_delta"] + steady_dir_y * shift_px)
-
-                pan_cap = max(float(mapper_cfg.pan_abs_max), steady_shift_pixels * 2.0)
-                controls["tx_delta"] = max(-pan_cap, min(pan_cap, float(controls["tx_delta"])))
-                controls["ty_delta"] = max(-pan_cap, min(pan_cap, float(controls["ty_delta"])))
-            else:
-                steady_dir_label = "none"
-                steady_dir_x = 0.0
-                steady_dir_y = 0.0
-        else:
-            steady_dir_label = "none"
-            steady_dir_x = 0.0
-            steady_dir_y = 0.0
         twist_gain = 0.0
         if (
             steady_twist
@@ -745,7 +593,6 @@ def run(
             ang_cap = max(float(mapper_cfg.angle_abs_max), steady_twist_max_deg * 2.0)
             controls["angle_delta"] = max(-ang_cap, min(ang_cap, float(controls["angle_delta"])))
 
-        steady_prev_active = bool(steady_active)
         onset_jitter_active = 0
         jitter_strength = 1.0 - quiet_gain
         if onset_jitter and not disable_music_change and jitter_strength > 1e-6:
@@ -779,16 +626,10 @@ def run(
                 prompt_switched = int(active_prompt_idx != prev_prompt_idx)
 
         prompt = prompt_candidates[active_prompt_idx]
-        # TODO(phase-2): wire transition_active from subject_controller.step(...)
-        # once prompt transition behavior is re-enabled.
-        transition_active = False
-        prompt = _apply_identity_anchor(prompt, lock_identity=lock_identity, identity_prompt=identity_prompt)
-
         # Adaptive cadence:
-        # always diffuse during subject transitions, otherwise cadence+beats.
+        # diffuse in full mode, on cadence frames, and on beats.
         do_diffuse = (
             (mode == "full")
-            or transition_active
             or (frame in beat_set)
             or (frame % max(1, cadence) == 0)
         )
@@ -802,26 +643,8 @@ def run(
 
         if do_diffuse:
             target_seed = float(42 + frame * 97 + int(controls["seed_jump"]))
-            # Seed travel-style interpolation during subject transitions.
-            if transition_active:
-                seed_state = seed_state + 0.25 * (target_seed - seed_state)
-            else:
-                seed_state = target_seed
+            seed_state = target_seed
             used_seed = int(seed_state)
-
-            # Keep transitions stable: moderate strength, avoid spikes.
-            if transition_active:
-                used_strength = max(0.55, min(0.70, used_strength))
-                used_cfg = min(used_cfg, 9.8)
-                used_noise = min(used_noise, 0.05)
-
-            # Init-image identity mode should preserve structure/colors aggressively.
-            if lock_identity:
-                used_seed = 42
-                used_strength = max(0.30, min(0.50, used_strength))
-                used_cfg = min(used_cfg, 8.5)
-                used_noise = min(used_noise, 0.02)
-                used_control_scale = max(0.90, used_control_scale)
 
             control_image = None
             if use_controlnet:
@@ -834,7 +657,6 @@ def run(
             noised = add_gaussian_noise(transformed, amount=used_noise, seed=used_seed + 17)
 
             # Periodically re-anchor to warped frame0 when init-image is provided.
-            # This works for both concept modes (identity/transform).
             if bool(init_image) and re_anchor and reference_frame is not None:
                 if frame % re_anchor_every == 0:
                     ref_warped = transform_image(
@@ -885,7 +707,6 @@ def run(
             args_slug=args_slug,
             last_completed_frame=frame,
             seed_state=seed_state,
-            subject_controller=subject_controller,
             total_frames=total_frames,
             fps=fps,
             prompt_state={
@@ -902,10 +723,10 @@ def run(
                 f"eng={energy_curve[frame]:.2f} onset={onset_curve[frame]:.2f} pitch={pitch_curve[frame]:.2f} "
                 f"str={used_strength:.3f} cfg={used_cfg:.2f} "
                 f"zoom={controls['zoom_delta']:.4f} pan=({controls['tx_delta']:+.2f},{controls['ty_delta']:+.2f}) "
-                f"stab={stability_curve[frame]:.2f} sact={int(steady_active)} sdir={steady_direction} tw={steady_twist_deg:+.2f} twg={twist_gain:.2f} "
+                f"tw={steady_twist_deg:+.2f} twg={twist_gain:.2f} "
                 f"qh={int(quiet_active)} qg={quiet_gain:.2f} jit={onset_jitter_active} "
                 f"pidx={active_prompt_idx} psw={prompt_switched} "
-                f"noise={used_noise:.3f} trans={int(transition_active)} "
+                f"noise={used_noise:.3f} "
                 f"cscale={used_control_scale:.3f} cn={'ON' if use_controlnet else 'OFF'} "
                 f"ra={int(re_anchor_applied)}"
             )

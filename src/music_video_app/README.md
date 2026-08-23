@@ -102,7 +102,6 @@ When `--resume-dir` is provided:
 ## Known Current Behavior
 
 - `--prompt-mode` is kept for CLI/state compatibility, but prompt construction strategy switching is not fully active yet.
-- Subject-transition controller state is persisted in resume files, but transition stepping into prompt behavior is not fully wired yet.
 
 ## Complete CLI Reference
 
@@ -123,11 +122,11 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 
 | Flag | Type | Default | Choices | Practical meaning | Example |
 |---|---|---:|---|---|---|
-| `--mode` | `str` | `full` | `full`, `cadence` | `full`: diffuse every frame. `cadence`: diffuse on cadence/beat/transition triggers. | `--mode cadence` |
+| `--mode` | `str` | `full` | `full`, `cadence` | `full`: diffuse every frame. `cadence`: diffuse on cadence and beat triggers. | `--mode cadence` |
 | `--cadence` | `int` | `3` | - | In cadence mode, diffuse every Nth frame (plus beat triggers). | `--cadence 2` |
 | `--coherence` | `str` | `blend` | `none`, `blend`, `optical_flow`, `rife`, `film` | Coherence strategy when diffusion is skipped on cadence frames. | `--coherence none` |
 
-### 3) Prompt / Concept / Identity
+### 3) Prompt / Initial Image
 
 | Flag | Type | Default | Choices | Practical meaning | Example |
 |---|---|---:|---|---|---|
@@ -135,8 +134,6 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 | `--prompt-change-every-beats` | `int` | `1` | - | For prompt lists, switch prompt every N beat events. | `--prompt-change-every-beats 2` |
 | `--prompt-mode` | `str` | `blend` | `blend`, `hard` | Compatibility flag for prompt behavior mode selection. | `--prompt-mode hard` |
 | `--init-image` | `str` | `None` | - | Seed frame 0 from this image (resized to pipeline dimensions). | `--init-image "starting_image.png"` |
-| `--concept-mode` | `str` | `identity` | `identity`, `transform` | How strongly to preserve init-image identity over time. | `--concept-mode transform` |
-| `--identity-prompt` | `str` | `""` | - | Extra identity anchor text appended when identity lock applies. | `--identity-prompt "same face and hairstyle"` |
 
 ### 4) Music-Reactive Motion / Dynamics
 
@@ -147,13 +144,6 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 | `--music-color-fx` | flag | `False` | - | Apply beat/energy-driven color and contrast effect. | `--music-color-fx` |
 | `--onset-jitter` | flag | `False` | - | Add onset-triggered deterministic jitter to camera deltas. | `--onset-jitter` |
 | `--quiet-hold` | flag | `False` | - | Detect quieter sections and calm motion/jitter/prompt changes. | `--quiet-hold` |
-| `--steady-shift` | flag | `False` | - | Enable strong directional pan in stable musical sections. | `--steady-shift` |
-| `--steady-activation-mode` | `str` | `auto` | `auto`, `manual` | Activation logic for steady shift. | `--steady-activation-mode auto` |
-| `--steady-activation-ratio` | `float` | `1.0` | - | Auto mode: fraction of eligible stable runs to keep. | `--steady-activation-ratio 0.8` |
-| `--steady-shift-probability` | `float` | `1.0` | - | Auto mode: per-run probability for applying shift. | `--steady-shift-probability 0.9` |
-| `--steady-min-seconds` | `float` | `1.0` | - | Manual mode: minimum consecutive stable duration before activation. | `--steady-min-seconds 1.5` |
-| `--steady-threshold` | `float` | `0.72` | - | Manual mode: stability threshold in `[0,1]`. | `--steady-threshold 0.8` |
-| `--steady-shift-pixels` | `float` | `6.0` | - | Base pan amount during steady-shift activity. | `--steady-shift-pixels 20` |
 | `--steady-twist` | flag | `False` | - | Enable onset-reactive rightward twist pulse. | `--steady-twist` |
 | `--steady-twist-max-deg` | `float` | `4.0` | - | Max extra angle from steady twist pulse. | `--steady-twist-max-deg 4.0` |
 | `--disable-camera-motion` | flag | `False` | - | Disable zoom/pan/rotate transform stage entirely. | `--disable-camera-motion` |
@@ -171,7 +161,7 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 | `--control-scale-beat-boost` | `float` | `0.3` | - | Control scale boost from beat pulse. | `--control-scale-beat-boost 0.25` |
 | `--control-scale-onset-boost` | `float` | `0.2` | - | Control scale boost from onset activity. | `--control-scale-onset-boost 0.15` |
 
-### 6) Color / Re-Anchor / Compatibility Transition Knobs
+### 6) Color / Re-Anchor
 
 | Flag | Type | Default | Choices | Practical meaning | Example |
 |---|---|---:|---|---|---|
@@ -180,9 +170,6 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 | `--re-anchor` | flag | `False` | - | Periodically blend back toward transformed frame 0. | `--re-anchor` |
 | `--re-anchor-strength` | `str` | `mid` | `small`, `mid`, `big`, numeric alpha | Re-anchor profile preset or direct alpha value. | `--re-anchor-strength big` |
 | `--re-anchor-every-frames` | `int` | `12` | - | Frequency for applying re-anchor logic. | `--re-anchor-every-frames 8` |
-| `--subject-hold-frames` | `int` | `32` | - | Compatibility transition hold parameter (persisted in state). | `--subject-hold-frames 48` |
-| `--subject-transition-frames` | `int` | `16` | - | Compatibility transition duration parameter (persisted in state). | `--subject-transition-frames 24` |
-| `--subject-smoothing-window` | `int` | `41` | - | Compatibility smoothing-window parameter for subject drive. | `--subject-smoothing-window 31` |
 
 ## Example Presets
 

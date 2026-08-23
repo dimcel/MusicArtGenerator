@@ -23,8 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=(
             "User prompt override. Supports single prompt or prompt list with '||' "
-            "separator (or JSON list string). In init-image identity mode, this is "
-            "the main prompt source."
+            "separator (or JSON list string)."
         ),
     )
     parser.add_argument(
@@ -62,9 +61,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--prompt-mode", choices=["blend", "hard"], default="blend")
     parser.add_argument("--coherence", choices=["none", "blend", "optical_flow", "rife", "film"], default="blend")
-    parser.add_argument("--subject-hold-frames", type=int, default=32)
-    parser.add_argument("--subject-transition-frames", type=int, default=16)
-    parser.add_argument("--subject-smoothing-window", type=int, default=41)
     parser.add_argument(
         "--max-seconds",
         type=float,
@@ -89,50 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--zoom-base", type=float, default=1.002, help="Base per-frame zoom multiplier for test profile.")
     parser.add_argument("--zoom-beat-boost", type=float, default=0.020, help="Additional zoom multiplier from beat pulse for test profile.")
     parser.add_argument(
-        "--steady-shift",
-        action="store_true",
-        help="Enable aggressive pan direction during musically stable sections.",
-    )
-    parser.add_argument(
-        "--steady-activation-mode",
-        choices=["auto", "manual"],
-        default="auto",
-        help="auto=derive activation duration from music features, manual=use threshold+min-seconds.",
-    )
-    parser.add_argument(
-        "--steady-activation-ratio",
-        type=float,
-        default=1.0,
-        help="Auto mode: fraction of eligible music-driven shift runs to keep (0..1).",
-    )
-    parser.add_argument(
-        "--steady-shift-probability",
-        type=float,
-        default=1.0,
-        help="Auto mode: per-selected-run probability that shift is applied (0..1).",
-    )
-    parser.add_argument(
-        "--steady-min-seconds",
-        type=float,
-        default=1.0,
-        help="Manual mode only: minimum consecutive stable duration before shift activates.",
-    )
-    parser.add_argument(
-        "--steady-threshold",
-        type=float,
-        default=0.72,
-        help="Manual mode only: stability threshold in [0,1] for steady-shift activation.",
-    )
-    parser.add_argument(
-        "--steady-shift-pixels",
-        type=float,
-        default=6.0,
-        help="Base pan magnitude (pixels/frame) while steady-shift is active.",
-    )
-    parser.add_argument(
         "--steady-twist",
         action="store_true",
-        help="Enable right-only twist (angle pulse) during steady music sections.",
+        help="Enable a right-only twist pulse triggered by onset activity.",
     )
     parser.add_argument(
         "--steady-twist-max-deg",
@@ -147,18 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Path to an initial image (jpg/png/webp). If set, frame 0 starts from this image.",
-    )
-    parser.add_argument(
-        "--concept-mode",
-        choices=["identity", "transform"],
-        default="identity",
-        help="How to treat init-image concept. identity=lock subject, transform=allow normal subject drift.",
-    )
-    parser.add_argument(
-        "--identity-prompt",
-        type=str,
-        default="",
-        help="Optional identity anchor text appended in identity concept mode.",
     )
     parser.add_argument(
         "--re-anchor",
@@ -225,9 +168,6 @@ def main(argv: Optional[list] = None):
         color_coherence_strength=args.color_coherence_strength,
         prompt_mode=args.prompt_mode,
         coherence=args.coherence,
-        subject_hold_frames=args.subject_hold_frames,
-        subject_transition_frames=args.subject_transition_frames,
-        subject_smoothing_window=args.subject_smoothing_window,
         max_seconds=args.max_seconds,
         with_audio=args.with_audio,
         use_controlnet=args.controlnet,
@@ -237,20 +177,11 @@ def main(argv: Optional[list] = None):
         control_scale_onset_boost=args.control_scale_onset_boost,
         zoom_base=args.zoom_base,
         zoom_beat_boost=args.zoom_beat_boost,
-        steady_shift=args.steady_shift,
-        steady_activation_mode=args.steady_activation_mode,
-        steady_activation_ratio=args.steady_activation_ratio,
-        steady_shift_probability=args.steady_shift_probability,
-        steady_min_seconds=args.steady_min_seconds,
-        steady_threshold=args.steady_threshold,
-        steady_shift_pixels=args.steady_shift_pixels,
         steady_twist=args.steady_twist,
         steady_twist_max_deg=args.steady_twist_max_deg,
         canny_low=args.canny_low,
         canny_high=args.canny_high,
         init_image=args.init_image,
-        concept_mode=args.concept_mode,
-        identity_prompt=args.identity_prompt,
         re_anchor=args.re_anchor,
         re_anchor_strength=args.re_anchor_strength,
         re_anchor_every_frames=args.re_anchor_every_frames,

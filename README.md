@@ -16,8 +16,8 @@ music-reactive video.
 - maps music features to diffusion strength, CFG scale, noise, zoom, pan,
   rotation, ControlNet scale, cadence, and prompt changes
 - starts from a text prompt or an optional initial image
-- supports cadence generation, quiet sections, onset jitter, steady movement,
-  twist, color coherence, and reference re-anchoring
+- supports cadence generation, quiet sections, onset jitter, twist, color
+  coherence, and reference re-anchoring
 - saves every frame, a run manifest, and resume state for long generations
 - exports a silent MP4 and can add the original audio with `ffmpeg`
 
@@ -90,7 +90,6 @@ Run commands from the repository directory:
 python -m src.music_video_app \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
-  --concept-mode transform \
   --prompt "a luminous landscape evolving through color and motion" \
   --max-seconds 8 \
   --mode cadence \
@@ -143,8 +142,7 @@ pixels, generation is computationally expensive, and results depend on the
 audio, prompt, initial image, selected controls, model, and hardware.
 
 `--prompt-mode` is retained for compatibility, but its strategy switch is not
-fully active. Subject-transition settings are saved in resume state, but they
-are not yet fully connected to prompt transitions.
+fully active.
 
 ## Responsible Use
 
