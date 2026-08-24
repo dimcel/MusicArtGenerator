@@ -11,13 +11,13 @@ try:
 except ModuleNotFoundError:
     Image = None
 
-from src.audio_feature_extractor import AudioFeatureExtractor
-from src.cadence_coherence import CadenceCoherence
-from src.color_coherence import apply_color_coherence
-from src.controlnet_conditioning import build_canny_control_image
-from src.image_noise import add_gaussian_noise
-from src.image_transform import transform_image
-from src.music_feature_mapper import (
+from music_art_generator.audio_feature_extractor import AudioFeatureExtractor
+from music_art_generator.cadence_coherence import CadenceCoherence
+from music_art_generator.color_coherence import apply_color_coherence
+from music_art_generator.controlnet_conditioning import build_canny_control_image
+from music_art_generator.image_noise import add_gaussian_noise
+from music_art_generator.image_transform import transform_image
+from music_art_generator.music_feature_mapper import (
     MusicMappingConfig,
     calibrate_feature_curve,
     map_frame_to_controls,
@@ -43,7 +43,7 @@ from .resume import (
 )
 
 try:
-    from src.image_generator import ImageGenerationConfig, ImageGenerator
+    from music_art_generator.image_generator import ImageGenerationConfig, ImageGenerator
 except ModuleNotFoundError:
     ImageGenerationConfig = None
     ImageGenerator = None
@@ -731,7 +731,7 @@ def run(
                 f"ra={int(re_anchor_applied)}"
             )
 
-    from frames_to_video import frames_to_video
+    from music_art_generator.frames_to_video import frames_to_video
 
     frames_to_video(str(output_dir), str(video_path), fps=fps)
     print(f"Video: {video_path}")

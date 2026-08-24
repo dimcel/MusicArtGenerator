@@ -6,15 +6,10 @@ visual jitter/drift by blending or by delegating to FrameInterpolator
 methods (optical_flow/rife/film).
 """
 
-from typing import Literal, Optional
 from PIL import Image
+from typing import Literal, Optional
 
-try:
-    # Package-style import
-    from .frame_interpolator import FrameInterpolator
-except ImportError:
-    # Script-style import when src/ is on sys.path
-    from frame_interpolator import FrameInterpolator
+from .frame_interpolator import FrameInterpolator
 
 
 class CadenceCoherence:

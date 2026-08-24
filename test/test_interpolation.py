@@ -8,15 +8,11 @@ Tests:
 4. Comparison of interpolation intervals
 """
 
-import sys
 from pathlib import Path
 from PIL import Image
 
-# Add _src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.frame_interpolator import FrameInterpolator, simple_interpolate
-from src._video_animator import VideoAnimator, VideoAnimationConfig, simple_animation
+from music_art_generator.frame_interpolator import FrameInterpolator, simple_interpolate
+from music_art_generator._video_animator import VideoAnimator, VideoAnimationConfig, simple_animation
 
 
 # =============================================================================
@@ -37,7 +33,7 @@ def test_interpolator_standalone():
     
     print("\nGenerating 2 test keyframes...")
     
-    from src.image_generator import ImageGenerator, ImageGenerationConfig
+    from music_art_generator.image_generator import ImageGenerator, ImageGenerationConfig
     
     gen_config = ImageGenerationConfig(width=512, height=512)
     generator = ImageGenerator(gen_config)

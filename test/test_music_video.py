@@ -10,16 +10,12 @@ Requirements:
     - librosa installed
 """
 
-import sys
 import os
 from pathlib import Path
 
-# Add _src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.music_sync import MusicSync
-from src.image_generator import ImageGenerator, ImageGenerationConfig
-from src.frame_interpolator import FrameInterpolator
+from music_art_generator.music_sync import MusicSync
+from music_art_generator.image_generator import ImageGenerator, ImageGenerationConfig
+from music_art_generator.frame_interpolator import FrameInterpolator
 
 
 # =============================================================================
@@ -190,7 +186,7 @@ def generate_music_synced_video():
     
     # Create video without audio first
     try:
-        from frames_to_video import frames_to_video
+        from music_art_generator.frames_to_video import frames_to_video
         
         frames_to_video(
             frames_dir=str(output_path),

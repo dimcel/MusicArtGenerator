@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 
-from src.music_video_app.music_logic import (
+from music_art_generator.music_video_app.music_logic import (
     _build_auto_steady_activation_mask,
     _build_onset_twist_gain,
     _build_quiet_hold_mask,

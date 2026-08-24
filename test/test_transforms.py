@@ -48,11 +48,9 @@ Combined with strength and seed jumps, this creates triple modulation:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.image_generator import ImageGenerator, ImageGenerationConfig
-from src.image_transform import transform_image
-from src.frame_interpolator import FrameInterpolator
+from music_art_generator.image_generator import ImageGenerator, ImageGenerationConfig
+from music_art_generator.image_transform import transform_image
+from music_art_generator.frame_interpolator import FrameInterpolator
 
 
 def generate_fake_beats(total_frames, fps=24, bpm=120):
@@ -190,7 +188,7 @@ def generate_transform_video():
     print(f"{'='*70}")
     
     try:
-        from frames_to_video import frames_to_video
+        from music_art_generator.frames_to_video import frames_to_video
         
         video_path = OUTPUT_DIR / "transform_video.mp4"
         frames_to_video(
@@ -382,7 +380,7 @@ def generate_transform_video_with_interpolation():
     print(f"{'='*70}")
     
     try:
-        from frames_to_video import frames_to_video
+        from music_art_generator.frames_to_video import frames_to_video
         
         video_path = OUTPUT_DIR / "transform_beat_sync.mp4"
         frames_to_video(

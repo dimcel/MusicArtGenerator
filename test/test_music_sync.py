@@ -10,13 +10,9 @@ This test demonstrates simple music synchronization:
 Inspired by sd-parseq's beat-locked keyframe scheduling.
 """
 
-import sys
 from pathlib import Path
 
-# Add _src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.music_sync import MusicSync, simple_beat_detection
+from music_art_generator.music_sync import MusicSync, simple_beat_detection
 
 
 def test_beat_detection_only():
@@ -166,9 +162,9 @@ def test_example_workflow():
 Example workflow for music-synced video generation:
 
 ```python
-from src.music_sync import MusicSync
-from src.video_animator import VideoAnimator
-from src.frame_interpolator import FrameInterpolator
+from music_art_generator.music_sync import MusicSync
+from music_art_generator.video_animator import VideoAnimator
+from music_art_generator.frame_interpolator import FrameInterpolator
 
 # 1. Set up music sync
 sync = MusicSync("song.mp3", fps=24)

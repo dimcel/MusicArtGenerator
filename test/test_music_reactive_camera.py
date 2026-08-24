@@ -12,15 +12,12 @@ Run:
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.frame_interpolator import FrameInterpolator
-from src.image_generator import ImageGenerationConfig, ImageGenerator
-from src.image_transform import transform_image
-from src.parseq_like_scheduler import ParameterSpec, ParseqLikeScheduler
+from music_art_generator.frame_interpolator import FrameInterpolator
+from music_art_generator.image_generator import ImageGenerationConfig, ImageGenerator
+from music_art_generator.image_transform import transform_image
+from music_art_generator.parseq_like_scheduler import ParameterSpec, ParseqLikeScheduler
 
 
 def generate_fake_beats(total_frames, fps=24, bpm=124):
@@ -228,7 +225,7 @@ def run(profile="extended", camera_intensity="strong", with_audio=False):
             print(f"Saved {i + 1}/{len(camera_frames)}")
 
     # Video.
-    from frames_to_video import frames_to_video
+    from music_art_generator.frames_to_video import frames_to_video
 
     video_path = output_dir / f"music_reactive_camera_{profile}_{camera_intensity}.mp4"
     frames_to_video(str(output_dir), str(video_path), fps=fps)

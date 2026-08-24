@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "music-art-generator"
+version = "1.0.0"
+description = "Generate music-reactive videos with frame-aligned audio features and recurrent diffusion."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Dimitrios Tselentis" },
+]
+keywords = [
+  "audio-reactive",
+  "diffusion",
+  "generative-art",
+  "music-visualization",
+  "stable-diffusion",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+  "accelerate>=0.30",
+  "diffusers>=0.30",
+  "librosa>=0.10",
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "Pillow>=10.0",
+  "safetensors>=0.4",
+  "soundfile>=0.12",
+  "torch>=2.2",
+  "transformers>=4.40",
+]
+
+[project.optional-dependencies]
+film = [
+  "tensorflow>=2.15",
+  "tensorflow-hub>=0.16",
+]
+acceleration = [
+  "xformers>=0.0.27",
+]
+optional = [
+  "tensorflow>=2.15",
+  "tensorflow-hub>=0.16",
+  "xformers>=0.0.27",
+]
+dev = [
+  "build>=1.2",
+  "pytest>=8.0",
+  "twine>=5.0",
+]
+
+[project.scripts]
+music-art-generator = "music_art_generator.music_video_app.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dimcel/MusicArtGenerator"
+Repository = "https://github.com/dimcel/MusicArtGenerator"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["music_art_generator*"]
+
+[tool.setuptools.package-data]
+"music_art_generator.music_video_app" = ["README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+pythonpath = ["src"]
+addopts = "-ra"

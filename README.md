@@ -5,9 +5,9 @@ frame-aligned features from an audio track, maps them to readable visual
 controls, and uses recurrent Stable Diffusion generation to create a
 music-reactive video.
 
-[![MusicArtGenerator example](examples/assets/twist_preview.gif)](examples/assets/twist_preview_with_audio.mp4)
+[![MusicArtGenerator example](https://raw.githubusercontent.com/dimcel/MusicArtGenerator/main/examples/assets/twist_preview.gif)](https://github.com/dimcel/MusicArtGenerator/blob/main/examples/assets/twist_preview_with_audio.mp4)
 
-*The animated preview is silent. [Open the MP4 to watch it with music](examples/assets/twist_preview_with_audio.mp4).*
+*The animated preview is silent. [Open the MP4 to watch it with music](https://github.com/dimcel/MusicArtGenerator/blob/main/examples/assets/twist_preview_with_audio.mp4).*
 
 ## What It Does
 
@@ -61,10 +61,19 @@ cd MusicArtGenerator
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements-temp.txt
+pip install .
 ```
 
 On Windows, activate the environment with `.venv\Scripts\activate`.
+
+For development, install the project in editable mode with the testing tools:
+
+```bash
+pip install -e ".[dev]"
+```
+
+The package is installed from this cloned repository. It is not currently
+published on PyPI.
 
 Install `ffmpeg` separately if needed:
 
@@ -79,15 +88,20 @@ sudo apt-get install ffmpeg
 winget install Gyan.FFmpeg
 ```
 
-Optional FILM, RIFE-related, and acceleration dependencies are listed in
-`requirements-optional.txt`.
+Install only the optional features you need:
+
+```bash
+pip install ".[film]"          # FILM interpolation
+pip install ".[acceleration]"  # xformers acceleration where supported
+pip install ".[optional]"      # all optional dependencies
+```
 
 ## Quick Start
 
 Run commands from the repository directory:
 
 ```bash
-python -m src.music_video_app \
+music-art-generator \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
   --prompt "a luminous landscape evolving through color and motion" \
@@ -126,13 +140,13 @@ Resume an interrupted or completed run with `--resume-dir`. In resume mode,
 
 ## Documentation
 
-- [Examples and presets](examples/README.md)
-- [Complete command-line reference](src/music_video_app/README.md)
-- Inspect the available arguments with `python -m src.music_video_app --help`
+- [Examples and presets](https://github.com/dimcel/MusicArtGenerator/blob/main/examples/README.md)
+- [Complete command-line reference](https://github.com/dimcel/MusicArtGenerator/blob/main/src/music_art_generator/music_video_app/README.md)
+- Inspect the available arguments with `music-art-generator --help`
 
-The preferred entrypoint is `python -m src.music_video_app`. The legacy
-`test/test_real_music_feature_video.py` wrapper remains available for
-compatibility.
+The preferred entrypoint is `music-art-generator`. The equivalent module command
+is `python -m music_art_generator.music_video_app`. The legacy
+`test/test_real_music_feature_video.py` wrapper remains available for compatibility.
 
 ## Current Status
 

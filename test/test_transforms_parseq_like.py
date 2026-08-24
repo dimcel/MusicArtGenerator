@@ -12,15 +12,12 @@ Run:
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.image_generator import ImageGenerator, ImageGenerationConfig
-from src.image_transform import transform_image
-from src.frame_interpolator import FrameInterpolator
-from src.parseq_like_scheduler import ParseqLikeScheduler, ParameterSpec
+from music_art_generator.image_generator import ImageGenerator, ImageGenerationConfig
+from music_art_generator.image_transform import transform_image
+from music_art_generator.frame_interpolator import FrameInterpolator
+from music_art_generator.parseq_like_scheduler import ParseqLikeScheduler, ParameterSpec
 
 
 def generate_fake_beats(total_frames, fps=24, bpm=120):
@@ -252,7 +249,7 @@ def generate_transform_video_parseq_like(preset="strong", with_audio=False, prof
 
     # Create video
     try:
-        from frames_to_video import frames_to_video
+        from music_art_generator.frames_to_video import frames_to_video
 
         video_path = output_dir / f"transform_parseq_like_{preset}_{profile}.mp4"
         frames_to_video(

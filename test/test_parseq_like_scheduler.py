@@ -5,13 +5,7 @@ Run:
     python test_parseq_like_scheduler.py
 """
 
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).parent
-sys.path.insert(0, str(ROOT.parent / "src"))
-
-from parseq_like_scheduler import ParseqLikeScheduler, ParameterSpec
+from music_art_generator.parseq_like_scheduler import ParameterSpec, ParseqLikeScheduler
 
 
 def fake_beats(total_frames: int, every: int = 12):

@@ -6,7 +6,10 @@ from typing import Optional
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        prog="music-art-generator",
+        description="Generate a music-reactive video from audio and visual prompts.",
+    )
     parser.add_argument("--audio", type=str, required=True, help="Path to audio file (mp3/wav/etc.)")
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument(

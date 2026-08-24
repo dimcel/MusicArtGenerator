@@ -1,5 +1,5 @@
-# Temporary runtime baseline dependencies for music_video_app.
-# Keep versions loose for easier environment adaptation.
+# Legacy requirements file. Runtime package metadata is authoritative in
+# pyproject.toml. This file is retained for existing environments.
 
 numpy>=1.24
 Pillow>=10.0

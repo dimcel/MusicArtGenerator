@@ -13,7 +13,7 @@ except ModuleNotFoundError:
     Image = None
     ImageEnhance = None
 
-from src.music_feature_mapper import MusicMappingConfig
+from music_art_generator.music_feature_mapper import MusicMappingConfig
 
 
 def _load_and_resize_init_image(path: str, width: int, height: int) -> Image.Image:
