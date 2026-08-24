@@ -196,4 +196,3 @@ class ParseqLikeScheduler:
 
     def build_schedule(self, total_frames: int) -> List[Dict[str, float]]:
         return [self.frame_params(f, total_frames) for f in range(total_frames)]
-

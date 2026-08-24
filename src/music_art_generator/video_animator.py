@@ -14,7 +14,7 @@ from PIL import Image
 from typing import List, Optional
 from dataclasses import dataclass
 
-from src.image_generator import ImageGenerator, ImageGenerationConfig
+from music_art_generator.image_generator import ImageGenerator, ImageGenerationConfig
 
 
 @dataclass

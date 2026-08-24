@@ -16,15 +16,11 @@ Run examples:
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent
-sys.path.insert(0, str(ROOT.parent / "src"))
-
-from image_generator import ImageGenerationConfig, ImageGenerator
-from image_transform import transform_image
-from parseq_like_scheduler import ParameterSpec, ParseqLikeScheduler
+from music_art_generator.image_generator import ImageGenerationConfig, ImageGenerator
+from music_art_generator.image_transform import transform_image
+from music_art_generator.parseq_like_scheduler import ParameterSpec, ParseqLikeScheduler
 
 
 def generate_fake_beats(total_frames, fps=24, bpm=124):
@@ -160,7 +156,7 @@ def run(frames=120, fps=24, bpm=124, mode="full", cadence=3, with_audio=False):
                 f"rot={p['angle_delta']:+.2f} str={strength:.3f} cfg={cfg_scale:.2f}"
             )
 
-    from frames_to_video import frames_to_video
+    from music_art_generator.frames_to_video import frames_to_video
 
     video_path = output_dir / f"deforum_like_music_{mode}_{frames}f.mp4"
     frames_to_video(str(output_dir), str(video_path), fps=fps)
@@ -209,4 +205,3 @@ if __name__ == "__main__":
         cadence=max(1, args.cadence),
         with_audio=args.with_audio,
     )
-

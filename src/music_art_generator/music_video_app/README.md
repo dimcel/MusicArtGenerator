@@ -17,7 +17,13 @@ It handles:
 Preferred:
 
 ```bash
-python -m src.music_video_app --audio "your_audio.wav" ...
+music-art-generator --audio "your_audio.wav" ...
+```
+
+Equivalent module entrypoint:
+
+```bash
+python -m music_art_generator.music_video_app --audio "your_audio.wav" ...
 ```
 
 Legacy-compatible wrapper:
@@ -28,34 +34,25 @@ python test/test_real_music_feature_video.py --audio "your_audio.wav" ...
 
 ## Installation
 
-This repository is not currently published as an installable Python package.
-For the main setup and first-run instructions, see the
-[project README](../../README.md).
+Install from the repository root. For the complete first-run instructions, see
+the [project README](../../../README.md).
 
 ### System prerequisite
 
 - `ffmpeg` in `PATH` for video export/audio mux.
 
-### Runtime baseline (`requirements-temp.txt`)
-
-#### with `uv`
-
-```bash
-uv venv .venv
-source .venv/bin/activate
-uv pip install -r requirements-temp.txt
-```
-
-#### with `pip`
+### Package installation
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements-temp.txt
+pip install .
 ```
 
-### Optional extras (`requirements-optional.txt`)
+Use `pip install -e ".[dev]"` for editable development and tests.
+
+### Optional extras
 
 Install only if you need these optional paths:
 
@@ -63,12 +60,12 @@ Install only if you need these optional paths:
 - optional acceleration extras (`xformers`)
 
 ```bash
-uv pip install -r requirements-optional.txt
-# or
-pip install -r requirements-optional.txt
+pip install ".[film]"          # FILM interpolation
+pip install ".[acceleration]"  # xformers where supported
+pip install ".[optional]"      # all optional dependencies
 ```
 
-For ready-to-run configurations, see the [examples guide](../../examples/README.md).
+For ready-to-run configurations, see the [examples guide](../../../examples/README.md).
 
 ## Runtime And Output
 
@@ -105,7 +102,8 @@ When `--resume-dir` is provided:
 
 ## Complete CLI Reference
 
-All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below.
+All flags from `build_parser()` in
+`src/music_art_generator/music_video_app/cli.py` are listed below.
 
 ### 1) Input / Output / Run Horizon
 
@@ -173,12 +171,12 @@ All flags from `build_parser()` in `src/music_video_app/cli.py` are listed below
 
 ## Example Presets
 
-The [examples guide](../../examples/README.md) contains basic cadence, onset
+The [examples guide](../../../examples/README.md) contains basic cadence, onset
 jitter, quiet hold, twist, prompt-list, ControlNet, and resume commands.
 
 ## Troubleshooting
 
-- `No module named ...`: install baseline requirements first (`requirements-temp.txt`).
+- `No module named ...`: run `pip install .` from the repository root.
 - `ffmpeg mux failed`: install `ffmpeg` and verify `ffmpeg -version` works.
 - `Audio file not found` / `Init image not found`: verify relative paths from your current working directory.
 - Slow generation on CPU: this is expected; GPU-enabled torch is recommended for practical runtime.
@@ -186,6 +184,7 @@ jitter, quiet hold, twist, prompt-list, ControlNet, and resume commands.
 ## Sanity Checks
 
 ```bash
-python -m src.music_video_app --help
+music-art-generator --help
+python -m music_art_generator.music_video_app --help
 python test/test_real_music_feature_video.py --help
 ```

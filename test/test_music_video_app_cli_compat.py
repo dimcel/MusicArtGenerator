@@ -1,6 +1,6 @@
 import pytest
 
-from src.music_video_app.cli import build_parser
+from music_art_generator.music_video_app.cli import build_parser
 
 
 EXPECTED_FLAGS = {

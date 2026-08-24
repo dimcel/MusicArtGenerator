@@ -1,12 +1,11 @@
 import json
-import sys
-import types
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-import src.music_video_app.runner as runner
+import music_art_generator.frames_to_video as frames_to_video_module
+import music_art_generator.music_video_app.runner as runner
 
 
 class _FakeFeatures:
@@ -82,10 +81,11 @@ def test_runner_smoke_with_mocked_dependencies(tmp_path, monkeypatch):
         with open(output_path, "wb") as f:
             f.write(b"fake-video")
 
-    fake_frames_mod = types.SimpleNamespace(
-        frames_to_video=_fake_frames_to_video
+    monkeypatch.setattr(
+        frames_to_video_module,
+        "frames_to_video",
+        _fake_frames_to_video,
     )
-    monkeypatch.setitem(sys.modules, "frames_to_video", fake_frames_mod)
 
     monkeypatch.setattr(runner, "AudioFeatureExtractor", _FakeExtractor)
     monkeypatch.setattr(runner, "ImageGenerator", _FakeGenerator)
@@ -106,7 +106,7 @@ def test_runner_smoke_with_mocked_dependencies(tmp_path, monkeypatch):
     assert len(output_dirs) == 1
     out_dir = output_dirs[0]
     assert out_dir.exists()
-    assert "_4f_" in out_dir.name
+    assert out_dir.name.endswith("_4f")
 
     frame_files = sorted(out_dir.glob("frame_*.png"))
     assert [p.name for p in frame_files] == [
@@ -149,8 +149,11 @@ def test_resume_run_creates_new_export_and_uses_current_fps(tmp_path, monkeypatc
         with open(output_path, "wb") as f:
             f.write(b"fake-video")
 
-    fake_frames_mod = types.SimpleNamespace(frames_to_video=_fake_frames_to_video)
-    monkeypatch.setitem(sys.modules, "frames_to_video", fake_frames_mod)
+    monkeypatch.setattr(
+        frames_to_video_module,
+        "frames_to_video",
+        _fake_frames_to_video,
+    )
 
     monkeypatch.setattr(runner, "AudioFeatureExtractor", _FakeExtractor)
     monkeypatch.setattr(runner, "ImageGenerator", _FakeGenerator)
@@ -189,7 +192,7 @@ def test_resume_run_creates_new_export_and_uses_current_fps(tmp_path, monkeypatc
     assert "_6f" in second_video.stem
 
     assert [call["fps"] for call in export_calls] == [4, 6]
-    assert export_calls[0]["output_path"] == first_video
+    assert export_calls[0]["output_path"].resolve() == first_video.resolve()
     assert export_calls[1]["output_path"] == second_video
 
     manifest_files = sorted(out_dir.glob("output_full_*.json"))

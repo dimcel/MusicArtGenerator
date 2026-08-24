@@ -1,7 +1,7 @@
 import json
 import time
 
-from src.music_video_app.resume import (
+from music_art_generator.music_video_app.resume import (
     _changed_run_arg_keys,
     _find_last_frame,
     _load_resume_state,

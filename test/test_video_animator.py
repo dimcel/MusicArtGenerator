@@ -6,13 +6,7 @@ Frame 0: prompt + noise → diffusion → image
 Frame N: previous_image + noise → diffusion → new_image
 """
 
-import sys
-from pathlib import Path
-
-# Add _src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.video_animator import VideoAnimator, VideoAnimationConfig, simple_animation
+from music_art_generator.video_animator import VideoAnimator, VideoAnimationConfig, simple_animation
 
 
 def test_short_animation():

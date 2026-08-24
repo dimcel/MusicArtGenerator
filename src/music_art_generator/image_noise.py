@@ -30,4 +30,3 @@ def add_gaussian_noise(
     noise = rng.normal(0.0, sigma, size=arr.shape).astype(np.float32)
     out = np.clip(arr + noise, 0.0, 255.0).astype(np.uint8)
     return Image.fromarray(out)
-

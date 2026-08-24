@@ -14,7 +14,7 @@ quiet hold, music-reactive zoom, and onset-reactive twist. The GIF is silent.
 ## Basic Cadence Generation
 
 ```bash
-python -m src.music_video_app \
+music-art-generator \
   --audio "path/to/track.wav" \
   --prompt "an abstract landscape made of light and flowing color" \
   --max-seconds 8 \
@@ -29,7 +29,7 @@ between diffusion updates use the selected coherence method.
 ## Onset Jitter And Quiet Hold
 
 ```bash
-python -m src.music_video_app \
+music-art-generator \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
   --prompt "a surreal night landscape with glowing geometric forms" \
@@ -49,7 +49,7 @@ sections.
 ## Twist And Quiet Hold
 
 ```bash
-python -m src.music_video_app \
+music-art-generator \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
   --prompt "a cosmic landscape with soft purple light and distant planets" \
@@ -72,7 +72,7 @@ onsets. Quiet hold calms both effects in lower-activity sections.
 ## Prompt Changes And ControlNet
 
 ```bash
-python -m src.music_video_app \
+music-art-generator \
   --audio "path/to/track.wav" \
   --init-image "path/to/starting_image.png" \
   --prompt "glowing forest at night || crystalline city at dawn || clouds above a violet ocean" \
@@ -93,7 +93,7 @@ to retain more visible structure.
 ## Resume A Run
 
 ```bash
-python -m src.music_video_app \
+music-art-generator \
   --audio "path/to/track.wav" \
   --resume-dir "output_cadence_20260823_153000_288f" \
   --max-seconds 8 \
@@ -117,5 +117,5 @@ want a direct continuation.
 | Several visual concepts | a `||` prompt list and `--prompt-change-every-beats` |
 | Continue a long generation | `--resume-dir` |
 
-See the [complete CLI reference](../src/music_video_app/README.md) for every
+See the [complete CLI reference](../src/music_art_generator/music_video_app/README.md) for every
 available setting and its default value.
