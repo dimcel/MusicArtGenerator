@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "music-art-generator"
-version = "1.0.0"
+version = "1.0.1"
 description = "Generate music-reactive videos with frame-aligned audio features and recurrent diffusion."
 readme = "README.md"
 requires-python = ">=3.10"
