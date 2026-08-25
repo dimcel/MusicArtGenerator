@@ -5,8 +5,8 @@ Reads frames from a directory and creates a video using ffmpeg.
 Useful for testing and manual video creation.
 
 Usage:
-    python frames_to_video.py --frames_dir output_frames --output video.mp4
-    python frames_to_video.py --frames_dir my_test --fps 30
+    python -m music_art_generator.frames_to_video --frames_dir output_frames --output video.mp4
+    python -m music_art_generator.frames_to_video --frames_dir my_test --fps 30
 """
 
 import os
