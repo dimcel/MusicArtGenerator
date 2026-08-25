@@ -1,5 +1,5 @@
 """
-Test Image Transformations
+Historical image transformation demonstration.
 Tests zoom, pan, and rotation effects before diffusion
 
 This shows how to apply Deforum-style transformations:
@@ -57,7 +57,7 @@ def generate_fake_beats(total_frames, fps=24, bpm=120):
     """
     Generate fake beat positions and intensities to simulate librosa.
     
-    This mimics what MusicSync would return, without needing audio files.
+    This creates a simple beat schedule without needing audio files.
     Real beats have slight variations, so we add some randomness.
     
     Args:

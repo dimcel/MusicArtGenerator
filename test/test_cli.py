@@ -41,7 +41,7 @@ EXPECTED_FLAGS = {
 }
 
 
-def test_cli_flags_match_legacy_set():
+def test_cli_flags_match_public_interface():
     parser = build_parser()
     flags = {
         option
@@ -52,7 +52,7 @@ def test_cli_flags_match_legacy_set():
     assert flags == EXPECTED_FLAGS
 
 
-def test_cli_defaults_and_types_match_legacy_behavior():
+def test_cli_defaults_and_types():
     parser = build_parser()
     args = parser.parse_args(["--audio", "song.wav"])
 

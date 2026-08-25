@@ -1,7 +1,8 @@
 """
-Test script for Image Generator
+Historical image generator demonstration.
 
-Simple test to verify the refactored image generation works.
+This loads the diffusion model and writes example images. It is not an
+automated unit test.
 """
 
 from pathlib import Path

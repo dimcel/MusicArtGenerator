@@ -26,12 +26,6 @@ Equivalent module entrypoint:
 python -m music_art_generator.music_video_app --audio "your_audio.wav" ...
 ```
 
-Legacy-compatible wrapper:
-
-```bash
-python test/test_real_music_feature_video.py --audio "your_audio.wav" ...
-```
-
 ## Installation
 
 Install from the repository root. For the complete first-run instructions, see
@@ -186,5 +180,4 @@ jitter, quiet hold, twist, prompt-list, ControlNet, and resume commands.
 ```bash
 music-art-generator --help
 python -m music_art_generator.music_video_app --help
-python test/test_real_music_feature_video.py --help
 ```

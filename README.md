@@ -98,7 +98,7 @@ pip install ".[optional]"      # all optional dependencies
 
 ## Quick Start
 
-Run commands from the repository directory:
+After activating the environment, run the installed command from any directory:
 
 ```bash
 music-art-generator \
@@ -145,8 +145,7 @@ Resume an interrupted or completed run with `--resume-dir`. In resume mode,
 - Inspect the available arguments with `music-art-generator --help`
 
 The preferred entrypoint is `music-art-generator`. The equivalent module command
-is `python -m music_art_generator.music_video_app`. The legacy
-`test/test_real_music_feature_video.py` wrapper remains available for compatibility.
+is `python -m music_art_generator.music_video_app`.
 
 ## Current Status
 
@@ -157,6 +156,19 @@ audio, prompt, initial image, selected controls, model, and hardware.
 
 `--prompt-mode` is retained for compatibility, but its strategy switch is not
 fully active.
+
+## Development Tests
+
+Install the development tools and run the automated suite with:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+The automated tests use small fixtures and mocks. Historical GPU demonstrations
+are kept separately under `scripts/legacy_demos/` and are not collected by
+Pytest.
 
 ## Responsible Use
 
